@@ -1,5 +1,7 @@
 package types
 
+import "encoding/json"
+
 // CommandExecutionStatus represents the status of a command execution.
 type CommandExecutionStatus string
 
@@ -22,6 +24,38 @@ type CommandExecutionItem struct {
 	ExitCode *int `json:"exitCode,omitempty"`
 	// Status is the current status of the command execution
 	Status CommandExecutionStatus `json:"status"`
+}
+
+// UnmarshalJSON supports both camelCase and snake_case fields from different transports.
+func (i *CommandExecutionItem) UnmarshalJSON(data []byte) error {
+	var payload struct {
+		ID                  string                 `json:"id"`
+		Type                string                 `json:"type"`
+		Command             string                 `json:"command"`
+		AggregatedOutput    *string                `json:"aggregatedOutput"`
+		AggregatedOutputAlt *string                `json:"aggregated_output"`
+		ExitCode            *int                   `json:"exitCode"`
+		ExitCodeAlt         *int                   `json:"exit_code"`
+		Status              CommandExecutionStatus `json:"status"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return err
+	}
+	i.ID = payload.ID
+	i.Type = payload.Type
+	i.Command = payload.Command
+	if payload.AggregatedOutput != nil {
+		i.AggregatedOutput = payload.AggregatedOutput
+	} else {
+		i.AggregatedOutput = payload.AggregatedOutputAlt
+	}
+	if payload.ExitCode != nil {
+		i.ExitCode = payload.ExitCode
+	} else {
+		i.ExitCode = payload.ExitCodeAlt
+	}
+	i.Status = payload.Status
+	return nil
 }
 
 // GetType returns the item type discriminator.

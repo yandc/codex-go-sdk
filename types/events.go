@@ -20,6 +20,25 @@ type ThreadStartedEvent struct {
 	ThreadId string `json:"threadId"`
 }
 
+// UnmarshalJSON supports both camelCase and snake_case thread id fields.
+func (e *ThreadStartedEvent) UnmarshalJSON(data []byte) error {
+	var payload struct {
+		Type      string `json:"type"`
+		ThreadID  string `json:"threadId"`
+		ThreadIDS string `json:"thread_id"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return err
+	}
+	e.Type = payload.Type
+	if payload.ThreadID != "" {
+		e.ThreadId = payload.ThreadID
+	} else {
+		e.ThreadId = payload.ThreadIDS
+	}
+	return nil
+}
+
 // GetType returns the event type discriminator
 func (e ThreadStartedEvent) GetType() string {
 	return e.Type

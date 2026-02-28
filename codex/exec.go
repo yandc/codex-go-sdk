@@ -435,6 +435,7 @@ func (c *CodexExec) startStdoutReader(
 			if len(line) > 0 {
 				line = strings.TrimRight(line, "\r\n")
 				if line != "" {
+					//c.logf("codex exec stdout raw: %s", line)
 					c.logf("codex exec stdout: %s", summarizeEventLine(line))
 				}
 				select {
