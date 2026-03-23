@@ -78,6 +78,39 @@ type PatchChangeKind struct {
 	MovePath *string             `json:"move_path,omitempty"`
 }
 
+// UnmarshalJSON accepts both string and object representations:
+// - "update"
+// - {"type":"update","move_path":"new/path"}
+func (k *PatchChangeKind) UnmarshalJSON(data []byte) error {
+	var asString string
+	if err := json.Unmarshal(data, &asString); err == nil {
+		k.Type = PatchChangeKindType(asString)
+		k.MovePath = nil
+		return nil
+	}
+
+	var payload struct {
+		Type        PatchChangeKindType `json:"type"`
+		TypeAlt     PatchChangeKindType `json:"kind"`
+		MovePath    *string             `json:"move_path"`
+		MovePathAlt *string             `json:"movePath"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return err
+	}
+	if payload.Type != "" {
+		k.Type = payload.Type
+	} else {
+		k.Type = payload.TypeAlt
+	}
+	if payload.MovePath != nil {
+		k.MovePath = payload.MovePath
+	} else {
+		k.MovePath = payload.MovePathAlt
+	}
+	return nil
+}
+
 // FileUpdateChange represents a set of file changes by the agent.
 type FileUpdateChange struct {
 	Path string          `json:"path"`

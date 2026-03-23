@@ -438,6 +438,35 @@ func TestItemCompletedEvent_FileChangeDeclined(t *testing.T) {
 	}
 }
 
+func TestItemCompletedEvent_FileChangeKindAsString(t *testing.T) {
+	payload := []byte(`{
+		"type": "item.completed",
+		"item": {
+			"type": "fileChange",
+			"id": "file-2",
+			"changes": [
+				{"path": "test.go", "kind": "update"}
+			],
+			"status": "completed"
+		}
+	}`)
+
+	var event types.ItemCompletedEvent
+	if err := json.Unmarshal(payload, &event); err != nil {
+		t.Fatalf("unmarshal item.completed failed: %v", err)
+	}
+	item, ok := event.Item.(*types.FileChangeItem)
+	if !ok {
+		t.Fatalf("expected FileChangeItem, got %T", event.Item)
+	}
+	if item.Changes[0].Kind.Type != types.PatchChangeKindUpdate {
+		t.Fatalf("expected kind %q, got %q", types.PatchChangeKindUpdate, item.Changes[0].Kind.Type)
+	}
+	if item.Changes[0].Kind.MovePath != nil {
+		t.Fatalf("expected move_path nil, got %v", item.Changes[0].Kind.MovePath)
+	}
+}
+
 func TestItemCompletedEvent_CommandExecutionDeclined(t *testing.T) {
 	payload := []byte(`{
 		"type": "item.completed",

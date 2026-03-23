@@ -176,7 +176,13 @@ func (c *CodexExec) Run(args CodexExecArgs) <-chan ExecResult {
 	output := make(chan ExecResult)
 
 	go func() {
-		defer close(output)
+		var done <-chan struct{}
+		defer func() {
+			if done != nil {
+				<-done
+			}
+			close(output)
+		}()
 
 		ctx := resolveContext(args.Context)
 		commandArgs := buildCommandArgs(args)
@@ -226,7 +232,7 @@ func (c *CodexExec) Run(args CodexExecArgs) <-chan ExecResult {
 
 		c.startInputWriter(stdin, args.Input)
 		stderrBuilder, stderrWg := c.startStderrCapture(stderr)
-		done := c.startStdoutReader(ctx, stdout, output, cmd)
+		done = c.startStdoutReader(ctx, stdout, output, cmd)
 
 		if waitErr := waitForCompletion(ctx, done, cmd, output); waitErr != nil {
 			return
@@ -435,8 +441,8 @@ func (c *CodexExec) startStdoutReader(
 			if len(line) > 0 {
 				line = strings.TrimRight(line, "\r\n")
 				if line != "" {
-					//c.logf("codex exec stdout raw: %s", line)
-					c.logf("codex exec stdout: %s", summarizeEventLine(line))
+					c.logf("codex exec stdout raw: %s", line)
+					//c.logf("codex exec stdout: %s", summarizeEventLine(line))
 				}
 				select {
 				case output <- ExecResult{Line: line}:
