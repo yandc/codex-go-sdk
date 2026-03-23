@@ -1,12 +1,19 @@
 package codex
 
 import (
+	"context"
+	"errors"
+
 	"github.com/fanwenlin/codex-go-sdk/types"
 )
 
 // Exec defines the interface for executing codex commands
 type Exec interface {
 	Run(args CodexExecArgs) <-chan ExecResult
+}
+
+type modelListExec interface {
+	ListModels(ctx context.Context, params types.ModelListParams) (*types.ModelListResponse, error)
 }
 
 // Codex is the main class for interacting with the Codex agent.
@@ -83,4 +90,12 @@ func (c *Codex) StartThread(options types.ThreadOptions) *Thread {
 // Returns a new thread instance.
 func (c *Codex) ResumeThread(id string, options types.ThreadOptions) *Thread {
 	return newThread(c.exec, c.options, options, &id)
+}
+
+// ListModels queries the app-server model catalog.
+func (c *Codex) ListModels(ctx context.Context, params types.ModelListParams) (*types.ModelListResponse, error) {
+	if exec, ok := c.exec.(modelListExec); ok {
+		return exec.ListModels(ctx, params)
+	}
+	return nil, errors.New("model list is only supported by app-server transport")
 }

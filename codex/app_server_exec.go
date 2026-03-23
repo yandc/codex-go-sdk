@@ -353,6 +353,25 @@ func (a *AppServerExec) initialize(ctx context.Context) error {
 	return a.notify("initialized", nil)
 }
 
+// ListModels fetches the app server model catalog.
+func (a *AppServerExec) ListModels(ctx context.Context, params types.ModelListParams) (*types.ModelListResponse, error) {
+	if err := a.ensureStarted(); err != nil {
+		return nil, err
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	result, err := a.call(ctx, "model/list", params)
+	if err != nil {
+		return nil, err
+	}
+	var resp types.ModelListResponse
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // Run executes the app server turn and returns a channel of JSONL event lines.
 func (a *AppServerExec) Run(args CodexExecArgs) <-chan ExecResult {
 	output := make(chan ExecResult)

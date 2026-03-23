@@ -27,6 +27,10 @@ type (
 	PatchApplyStatus = types.PatchApplyStatus
 	// McpToolCallStatus represents the status of an MCP tool call.
 	McpToolCallStatus = types.McpToolCallStatus
+	// ReasoningEffort represents reasoning effort values exposed by the model catalog.
+	ReasoningEffort = types.ReasoningEffort
+	// InputModality represents a supported input modality for a model.
+	InputModality = types.InputModality
 )
 
 // Constant values for TransportMode.
@@ -63,6 +67,22 @@ const (
 	ModelReasoningEffortMedium  = types.ModelReasoningEffortMedium
 	ModelReasoningEffortHigh    = types.ModelReasoningEffortHigh
 	ModelReasoningEffortXHigh   = types.ModelReasoningEffortXHigh
+)
+
+// Constant values for ReasoningEffort.
+const (
+	ReasoningEffortNone    = types.ReasoningEffortNone
+	ReasoningEffortMinimal = types.ReasoningEffortMinimal
+	ReasoningEffortLow     = types.ReasoningEffortLow
+	ReasoningEffortMedium  = types.ReasoningEffortMedium
+	ReasoningEffortHigh    = types.ReasoningEffortHigh
+	ReasoningEffortXHigh   = types.ReasoningEffortXHigh
+)
+
+// Constant values for InputModality.
+const (
+	InputModalityText  = types.InputModalityText
+	InputModalityImage = types.InputModalityImage
 )
 
 // Constant values for WebSearchMode.
@@ -117,6 +137,10 @@ type (
 	ExitedReviewModeItem  = types.ExitedReviewModeItem
 	CompactedItem         = types.CompactedItem
 	CollabToolCallItem    = types.CollabToolCallItem
+	Model                 = types.Model
+	ModelUpgradeInfo      = types.ModelUpgradeInfo
+	ModelAvailabilityNux  = types.ModelAvailabilityNux
+	ReasoningEffortOption = types.ReasoningEffortOption
 )
 
 // Re-export option types.
@@ -135,6 +159,10 @@ type (
 	ApprovalRequest = types.ApprovalRequest
 	// ApprovalHandler handles approval requests from the app server.
 	ApprovalHandler = types.ApprovalHandler
+	// ModelListParams configures model catalog queries.
+	ModelListParams = types.ModelListParams
+	// ModelListResponse contains paginated model catalog results.
+	ModelListResponse = types.ModelListResponse
 )
 
 // Re-export alias types.
