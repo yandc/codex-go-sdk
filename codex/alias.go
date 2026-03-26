@@ -31,6 +31,10 @@ type (
 	ReasoningEffort = types.ReasoningEffort
 	// InputModality represents a supported input modality for a model.
 	InputModality = types.InputModality
+	// PlanType describes the account subscription tier.
+	PlanType = types.PlanType
+	// ReviewDelivery controls inline vs detached review execution.
+	ReviewDelivery = types.ReviewDelivery
 )
 
 // Constant values for TransportMode.
@@ -83,6 +87,25 @@ const (
 const (
 	InputModalityText  = types.InputModalityText
 	InputModalityImage = types.InputModalityImage
+)
+
+// Constant values for PlanType.
+const (
+	PlanTypeFree       = types.PlanTypeFree
+	PlanTypeGo         = types.PlanTypeGo
+	PlanTypePlus       = types.PlanTypePlus
+	PlanTypePro        = types.PlanTypePro
+	PlanTypeTeam       = types.PlanTypeTeam
+	PlanTypeBusiness   = types.PlanTypeBusiness
+	PlanTypeEnterprise = types.PlanTypeEnterprise
+	PlanTypeEdu        = types.PlanTypeEdu
+	PlanTypeUnknown    = types.PlanTypeUnknown
+)
+
+// Constant values for ReviewDelivery.
+const (
+	ReviewDeliveryInline   = types.ReviewDeliveryInline
+	ReviewDeliveryDetached = types.ReviewDeliveryDetached
 )
 
 // Constant values for WebSearchMode.
@@ -163,6 +186,28 @@ type (
 	ModelListParams = types.ModelListParams
 	// ModelListResponse contains paginated model catalog results.
 	ModelListResponse = types.ModelListResponse
+	// GetAccountParams configures account/read.
+	GetAccountParams = types.GetAccountParams
+	// GetAccountResponse contains the account/read response.
+	GetAccountResponse = types.GetAccountResponse
+	// GetAccountRateLimitsResponse contains the account/rateLimits/read response.
+	GetAccountRateLimitsResponse = types.GetAccountRateLimitsResponse
+	// Account represents the active authentication state.
+	Account = types.Account
+	// RateLimitWindow represents one rate-limit window.
+	RateLimitWindow = types.RateLimitWindow
+	// CreditsSnapshot contains credit information.
+	CreditsSnapshot = types.CreditsSnapshot
+	// RateLimitSnapshot mirrors the app-server rate limit payload.
+	RateLimitSnapshot = types.RateLimitSnapshot
+	// ReviewTarget describes what a review should inspect.
+	ReviewTarget = types.ReviewTarget
+	// ReviewStartParams configures review/start.
+	ReviewStartParams = types.ReviewStartParams
+	// ReviewStartResponse contains the immediate review/start response.
+	ReviewStartResponse = types.ReviewStartResponse
+	// SlashCommandInfo describes one supported slash command.
+	SlashCommandInfo = types.SlashCommandInfo
 )
 
 // Re-export alias types.

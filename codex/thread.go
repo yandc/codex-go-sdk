@@ -5,10 +5,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/fanwenlin/codex-go-sdk/types"
 )
+
+type reviewExec interface {
+	RunReview(args CodexExecArgs, params types.ReviewStartParams) <-chan ExecResult
+}
+
+var syntheticTurnCounter uint64
 
 // Thread represents a conversation thread with the agent.
 type Thread struct {
@@ -35,6 +44,10 @@ func newThread(exec Exec, options types.CodexOptions, threadOptions types.Thread
 
 // RunStreamed provides input to the agent and streams events as they are produced.
 func (t *Thread) RunStreamed(input types.Input, turnOptions types.TurnOptions) (*types.StreamedTurn, error) {
+	if cmd, ok := parseSlashCommand(input); ok && isSupportedSlashCommand(cmd.name) {
+		return t.runSlashStreamed(cmd, turnOptions)
+	}
+
 	events, err := t.runStreamedInternal(input, turnOptions)
 	if err != nil {
 		return nil, err
@@ -194,7 +207,7 @@ func threadEventFactory(eventType string) (func() types.ThreadEvent, bool) {
 
 // Run provides input to the agent and returns the completed turn.
 func (t *Thread) Run(input types.Input, turnOptions types.TurnOptions) (*types.Turn, error) {
-	events, err := t.runStreamedInternal(input, turnOptions)
+	streamed, err := t.RunStreamed(input, turnOptions)
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +217,7 @@ func (t *Thread) Run(input types.Input, turnOptions types.TurnOptions) (*types.T
 	var usage *types.Usage
 	var turnFailure error
 
-	for event := range events {
+	for event := range streamed.Events {
 		switch e := event.(type) {
 		case *types.ItemCompletedEvent:
 			// Check if this is an agent message to get the final response
@@ -234,6 +247,420 @@ func (t *Thread) Run(input types.Input, turnOptions types.TurnOptions) (*types.T
 		FinalResponse: finalResponse,
 		Usage:         usage,
 	}, nil
+}
+
+func (t *Thread) runSlashStreamed(
+	cmd *slashCommand,
+	turnOptions types.TurnOptions,
+) (*types.StreamedTurn, error) {
+	switch cmd.name {
+	case "init":
+		initTarget, ok := t.initTargetPath()
+		if ok {
+			if _, err := os.Stat(initTarget); err == nil {
+				return t.syntheticMessageStream(
+					resolveTurnContext(turnOptions),
+					"AGENTS.md already exists here. Skipping /init to avoid overwriting it.",
+				), nil
+			}
+		}
+		return t.runStandardPromptStreamed(strings.TrimSpace(initCommandPrompt), turnOptions)
+	case "review", "review-branch", "review-commit":
+		return t.runReviewCommandStreamed(cmd, turnOptions)
+	case "status":
+		return t.runStatusCommandStreamed(turnOptions)
+	case "compact":
+		return t.runCompactCommandStreamed(turnOptions)
+	default:
+		return t.runStandardPromptStreamed("/"+cmd.name, turnOptions)
+	}
+}
+
+func (t *Thread) initTargetPath() (string, bool) {
+	workingDir := strings.TrimSpace(t.threadOptions.WorkingDirectory)
+	if workingDir == "" {
+		return "", false
+	}
+	return filepath.Join(workingDir, "AGENTS.md"), true
+}
+
+func (t *Thread) runStandardPromptStreamed(
+	prompt string,
+	turnOptions types.TurnOptions,
+) (*types.StreamedTurn, error) {
+	events, err := t.runStreamedInternal(prompt, turnOptions)
+	if err != nil {
+		return nil, err
+	}
+	return &types.StreamedTurn{Events: events}, nil
+}
+
+func (t *Thread) runReviewCommandStreamed(
+	cmd *slashCommand,
+	turnOptions types.TurnOptions,
+) (*types.StreamedTurn, error) {
+	reviewer, ok := t.exec.(reviewExec)
+	if !ok {
+		return nil, fmt.Errorf("/%s requires app-server transport", cmd.name)
+	}
+
+	target, err := buildReviewTarget(cmd)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx := resolveTurnContext(turnOptions)
+	args := t.buildExecArgs(ctx, "", nil, nil, "")
+	events := make(chan types.ThreadEvent)
+
+	go func() {
+		defer close(events)
+		resultChan := reviewer.RunReview(args, types.ReviewStartParams{
+			Target: target,
+		})
+		for result := range resultChan {
+			event, eventErr := t.processExecResult(result)
+			if eventErr != nil {
+				events <- &types.ThreadErrorEvent{
+					Type:    "error",
+					Message: eventErr.Error(),
+				}
+				return
+			}
+			if event == nil {
+				continue
+			}
+			if threadStarted, ok := event.(*types.ThreadStartedEvent); ok {
+				t.id = &threadStarted.ThreadId
+			}
+			select {
+			case events <- event:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	return &types.StreamedTurn{Events: events}, nil
+}
+
+func (t *Thread) runStatusCommandStreamed(
+	turnOptions types.TurnOptions,
+) (*types.StreamedTurn, error) {
+	ctx := resolveTurnContext(turnOptions)
+
+	var accountResp types.GetAccountResponse
+	if err := t.appServerRPCTyped(ctx, "account/read", types.GetAccountParams{
+		RefreshToken: false,
+	}, &accountResp); err != nil {
+		return nil, err
+	}
+
+	var limitsResp types.GetAccountRateLimitsResponse
+	if err := t.appServerRPCTyped(ctx, "account/rateLimits/read", nil, &limitsResp); err != nil {
+		return nil, err
+	}
+
+	message := formatStatusMessage(&accountResp, &limitsResp)
+	return t.syntheticMessageStream(ctx, message), nil
+}
+
+func (t *Thread) runCompactCommandStreamed(
+	turnOptions types.TurnOptions,
+) (*types.StreamedTurn, error) {
+	ctx := resolveTurnContext(turnOptions)
+	threadID, err := t.ensureAppServerThread(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := t.appServerRPCTyped(ctx, "thread/compact/start", map[string]interface{}{
+		"threadId": threadID,
+	}, nil); err != nil {
+		return nil, err
+	}
+
+	return t.syntheticMessageStream(ctx, "Started context compaction for this thread."), nil
+}
+
+func (t *Thread) appServerRPCTyped(
+	ctx context.Context,
+	method string,
+	params interface{},
+	out interface{},
+) error {
+	if exec, ok := t.exec.(appServerRPCExec); ok {
+		result, err := exec.RPCCall(ctx, method, params)
+		if err != nil {
+			return err
+		}
+		if out == nil {
+			return nil
+		}
+		return json.Unmarshal(result, out)
+	}
+	return fmt.Errorf("%s requires app-server transport", method)
+}
+
+func (t *Thread) ensureAppServerThread(ctx context.Context) (string, error) {
+	if t.id != nil && strings.TrimSpace(*t.id) != "" {
+		return *t.id, nil
+	}
+
+	params := map[string]interface{}{}
+	if model := strings.TrimSpace(t.threadOptions.Model); model != "" {
+		params["model"] = model
+	}
+
+	var response struct {
+		Thread struct {
+			ID string `json:"id"`
+		} `json:"thread"`
+	}
+	if err := t.appServerRPCTyped(ctx, "thread/start", params, &response); err != nil {
+		return "", err
+	}
+	if response.Thread.ID == "" {
+		return "", fmt.Errorf("thread/start did not return thread id")
+	}
+	t.id = &response.Thread.ID
+	return response.Thread.ID, nil
+}
+
+func buildReviewTarget(cmd *slashCommand) (types.ReviewTarget, error) {
+	switch cmd.name {
+	case "review":
+		if strings.TrimSpace(cmd.args) == "" {
+			return types.ReviewTarget{Type: "uncommittedChanges"}, nil
+		}
+		return types.ReviewTarget{
+			Type:         "custom",
+			Instructions: strings.TrimSpace(cmd.args),
+		}, nil
+	case "review-branch":
+		if strings.TrimSpace(cmd.args) == "" {
+			return types.ReviewTarget{}, fmt.Errorf("/review-branch requires a branch name")
+		}
+		return types.ReviewTarget{
+			Type:   "baseBranch",
+			Branch: strings.TrimSpace(cmd.args),
+		}, nil
+	case "review-commit":
+		if strings.TrimSpace(cmd.args) == "" {
+			return types.ReviewTarget{}, fmt.Errorf("/review-commit requires a commit sha")
+		}
+		return types.ReviewTarget{
+			Type: "commit",
+			SHA:  strings.TrimSpace(cmd.args),
+		}, nil
+	default:
+		return types.ReviewTarget{}, fmt.Errorf("unsupported review command: /%s", cmd.name)
+	}
+}
+
+func (t *Thread) syntheticMessageStream(ctx context.Context, message string) *types.StreamedTurn {
+	events := make(chan types.ThreadEvent)
+	go func() {
+		defer close(events)
+		itemID := fmt.Sprintf("msg-synth-%d", atomic.AddUint64(&syntheticTurnCounter, 1))
+
+		started := &types.TurnStartedEvent{Type: "turn.started"}
+		itemStarted := &types.ItemStartedEvent{
+			Type: "item.started",
+			Item: &types.AgentMessageItem{ID: itemID, Type: "agentMessage", Text: ""},
+		}
+		itemUpdated := &types.ItemUpdatedEvent{
+			Type: "item.updated",
+			Item: &types.AgentMessageItem{ID: itemID, Type: "agentMessage", Text: message},
+		}
+		itemCompleted := &types.ItemCompletedEvent{
+			Type: "item.completed",
+			Item: &types.AgentMessageItem{ID: itemID, Type: "agentMessage", Text: message},
+		}
+		turnCompleted := &types.TurnCompletedEvent{
+			Type:  "turn.completed",
+			Usage: types.Usage{},
+		}
+
+		for _, event := range []types.ThreadEvent{started, itemStarted, itemUpdated, itemCompleted, turnCompleted} {
+			select {
+			case events <- event:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return &types.StreamedTurn{Events: events}
+}
+
+func formatStatusMessage(
+	accountResp *types.GetAccountResponse,
+	limitsResp *types.GetAccountRateLimitsResponse,
+) string {
+	var parts []string
+
+	if accountResp == nil || accountResp.Account == nil {
+		parts = append(parts, "Account: not logged in")
+	} else {
+		account := accountResp.Account
+		accountLine := "Account: " + account.Type
+		if account.Email != "" {
+			accountLine += " (" + account.Email + ")"
+		}
+		if account.PlanType != "" {
+			accountLine += " [" + string(account.PlanType) + "]"
+		}
+		parts = append(parts, accountLine)
+	}
+
+	if accountResp != nil {
+		parts = append(parts, fmt.Sprintf("Requires OpenAI auth: %t", accountResp.RequiresOpenAIAuth))
+	}
+
+	if limitsResp == nil {
+		return strings.Join(parts, "\n")
+	}
+
+	rateLimitLines := selectStatusRateLimitLines(limitsResp)
+	if len(rateLimitLines) == 0 {
+		return strings.Join(parts, "\n")
+	}
+	parts = append(parts, "", "Rate limits:")
+	parts = append(parts, rateLimitLines...)
+
+	return strings.Join(parts, "\n")
+}
+
+func selectStatusRateLimitLines(limitsResp *types.GetAccountRateLimitsResponse) []string {
+	if limitsResp == nil {
+		return nil
+	}
+	if snapshot, ok := limitsResp.RateLimitsByLimitID["codex"]; ok {
+		return formatRateLimitSnapshot(limitBucketLabel(snapshot, "codex"), snapshot)
+	}
+	return formatRateLimitSnapshot(limitBucketLabel(limitsResp.RateLimits, "default"), limitsResp.RateLimits)
+}
+
+func formatRateLimitSnapshot(bucketLabel string, snapshot types.RateLimitSnapshot) []string {
+	var lines []string
+	showBucketLabel := bucketLabel != "" && !strings.EqualFold(bucketLabel, "codex")
+
+	if showBucketLabel {
+		lines = append(lines, fmt.Sprintf("- %s limit", bucketLabel))
+	}
+
+	if snapshot.Primary != nil {
+		lines = append(lines, formatRateLimitWindow(bucketLabel, snapshot.Primary, "5h", showBucketLabel))
+	}
+	if snapshot.Secondary != nil {
+		lines = append(lines, formatRateLimitWindow(bucketLabel, snapshot.Secondary, "weekly", showBucketLabel))
+	}
+	if snapshot.Credits != nil {
+		if creditLine := formatCreditsLine(snapshot.Credits, showBucketLabel); creditLine != "" {
+			lines = append(lines, creditLine)
+		}
+	}
+
+	if len(lines) == 0 {
+		if showBucketLabel {
+			return []string{fmt.Sprintf("- %s limit", bucketLabel)}
+		}
+		return []string{"- codex limit"}
+	}
+
+	return lines
+}
+
+func limitBucketLabel(snapshot types.RateLimitSnapshot, fallback string) string {
+	if snapshot.LimitName != nil && strings.TrimSpace(*snapshot.LimitName) != "" {
+		return strings.TrimSpace(*snapshot.LimitName)
+	}
+	if snapshot.LimitID != nil && strings.TrimSpace(*snapshot.LimitID) != "" {
+		return strings.TrimSpace(*snapshot.LimitID)
+	}
+	return fallback
+}
+
+func formatRateLimitWindow(
+	bucketLabel string,
+	window *types.RateLimitWindow,
+	fallbackLabel string,
+	showBucketLabel bool,
+) string {
+	label := fallbackLabel
+	if window.WindowDurationMins != nil {
+		label = getLimitsDuration(*window.WindowDurationMins)
+	}
+	label = strings.Title(label) + " limit"
+
+	if showBucketLabel && label != "Weekly limit" && label != "Monthly limit" && label != "Annual limit" {
+		label = bucketLabel + " " + label
+	}
+
+	percentLeft := int((100.0 - float64(window.UsedPercent)))
+	if percentLeft < 0 {
+		percentLeft = 0
+	}
+	if percentLeft > 100 {
+		percentLeft = 100
+	}
+
+	line := fmt.Sprintf("  %s: %d%% left", label, percentLeft)
+	if window.ResetsAt != nil {
+		line += fmt.Sprintf(" (resets at %s)", formatResetTime(*window.ResetsAt))
+	}
+	return line
+}
+
+func formatResetTime(unixSeconds int64) string {
+	return time.Unix(unixSeconds, 0).Local().Format("2006-01-02 15:04")
+}
+
+func formatCreditsLine(credits *types.CreditsSnapshot, showBucketLabel bool) string {
+	label := "Credits"
+	if showBucketLabel {
+		label = "  " + label
+	}
+	switch {
+	case credits.Unlimited:
+		return label + ": Unlimited"
+	case credits.Balance != nil && strings.TrimSpace(*credits.Balance) != "":
+		return label + ": " + strings.TrimSpace(*credits.Balance)
+	case credits.HasCredits:
+		return label + ": Available"
+	default:
+		return ""
+	}
+}
+
+func getLimitsDuration(windowMinutes int64) string {
+	const minutesPerHour = int64(60)
+	const minutesPerDay = int64(24) * minutesPerHour
+	const minutesPerWeek = int64(7) * minutesPerDay
+	const minutesPerMonth = int64(30) * minutesPerDay
+	const roundingBiasMinutes = int64(3)
+
+	windowMinutes = maxInt64(windowMinutes, 0)
+
+	switch {
+	case windowMinutes <= minutesPerDay+roundingBiasMinutes:
+		adjusted := windowMinutes + roundingBiasMinutes
+		hours := maxInt64(1, adjusted/minutesPerHour)
+		return fmt.Sprintf("%dh", hours)
+	case windowMinutes <= minutesPerWeek+roundingBiasMinutes:
+		return "weekly"
+	case windowMinutes <= minutesPerMonth+roundingBiasMinutes:
+		return "monthly"
+	default:
+		return "annual"
+	}
+}
+
+func maxInt64(a int64, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // normalizeInput normalizes the input into a prompt string and image paths.

@@ -67,6 +67,9 @@ type AppServerExec struct {
 
 	knownThreadsMu sync.Mutex
 	knownThreads   map[string]struct{}
+
+	closeOnce sync.Once
+	closed    atomic.Bool
 }
 
 // NewAppServerExec creates a new AppServerExec instance.
@@ -123,6 +126,9 @@ func (a *AppServerExec) logf(format string, args ...interface{}) {
 }
 
 func (a *AppServerExec) ensureStarted() error {
+	if a.closed.Load() {
+		return errors.New("app server exec is closed")
+	}
 	a.startOnce.Do(func() {
 		a.startErr = a.start()
 	})
@@ -312,11 +318,25 @@ func (a *AppServerExec) call(ctx context.Context, method string, params interfac
 	}
 }
 
+// RPCCall executes a raw app-server RPC request and returns the result payload.
+func (a *AppServerExec) RPCCall(ctx context.Context, method string, params interface{}) (json.RawMessage, error) {
+	if err := a.ensureStarted(); err != nil {
+		return nil, err
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return a.call(ctx, method, params)
+}
+
 func (a *AppServerExec) notify(method string, params interface{}) error {
 	return a.sendRequest(0, method, params)
 }
 
 func (a *AppServerExec) sendRequest(id int64, method string, params interface{}) error {
+	if a.closed.Load() {
+		return errors.New("app server exec is closed")
+	}
 	payload := map[string]interface{}{
 		"method": method,
 	}
@@ -337,6 +357,74 @@ func (a *AppServerExec) sendRequest(id int64, method string, params interface{})
 		return writeErr
 	}
 	return nil
+}
+
+// Close terminates the long-lived app-server process and releases resources.
+func (a *AppServerExec) Close() error {
+	var closeErr error
+
+	a.closeOnce.Do(func() {
+		a.closed.Store(true)
+		a.failPendingCalls()
+		a.closeSubscribers()
+
+		if a.stdin != nil {
+			if err := a.stdin.Close(); err != nil && !errors.Is(err, os.ErrClosed) && closeErr == nil {
+				closeErr = err
+			}
+		}
+		if a.stdout != nil {
+			if err := a.stdout.Close(); err != nil && !errors.Is(err, os.ErrClosed) && closeErr == nil {
+				closeErr = err
+			}
+		}
+		if a.cmd != nil {
+			if a.cmd.Process != nil {
+				if err := a.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) && closeErr == nil {
+					closeErr = err
+				}
+			}
+			if err := a.cmd.Wait(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+				var exitErr *exec.ExitError
+				if !errors.As(err, &exitErr) && closeErr == nil {
+					closeErr = err
+				}
+			}
+		}
+	})
+
+	return closeErr
+}
+
+func (a *AppServerExec) failPendingCalls() {
+	a.pendingMu.Lock()
+	pending := a.pending
+	a.pending = make(map[int64]chan rpcEnvelope)
+	a.pendingMu.Unlock()
+
+	envelope := rpcEnvelope{
+		Error: &rpcError{
+			Message: "app server exec is closed",
+		},
+	}
+	for _, ch := range pending {
+		select {
+		case ch <- envelope:
+		default:
+		}
+		close(ch)
+	}
+}
+
+func (a *AppServerExec) closeSubscribers() {
+	a.subsMu.Lock()
+	subs := a.subs
+	a.subs = make(map[chan appEvent]struct{})
+	a.subsMu.Unlock()
+
+	for ch := range subs {
+		close(ch)
+	}
 }
 
 func (a *AppServerExec) initialize(ctx context.Context) error {
@@ -387,6 +475,23 @@ func (a *AppServerExec) Run(args CodexExecArgs) <-chan ExecResult {
 	return output
 }
 
+// RunReview executes review/start and streams the resulting turn events.
+func (a *AppServerExec) RunReview(
+	args CodexExecArgs,
+	params types.ReviewStartParams,
+) <-chan ExecResult {
+	output := make(chan ExecResult)
+
+	go func() {
+		defer close(output)
+		if err := a.runReview(args, params, output); err != nil {
+			output <- ExecResult{Error: err}
+		}
+	}()
+
+	return output
+}
+
 func (a *AppServerExec) runTurn(args CodexExecArgs, output chan ExecResult) error {
 	startErr := a.ensureStarted()
 	if startErr != nil {
@@ -422,6 +527,50 @@ func (a *AppServerExec) runTurn(args CodexExecArgs, output chan ExecResult) erro
 	if turnID == "" {
 		// If the server did not return a turn id, rely on events to detect completion.
 		a.logf("app server: missing turn id in response")
+	}
+
+	return a.streamTurn(ctx, threadID, turnID, args, output)
+}
+
+func (a *AppServerExec) runReview(
+	args CodexExecArgs,
+	params types.ReviewStartParams,
+	output chan ExecResult,
+) error {
+	startErr := a.ensureStarted()
+	if startErr != nil {
+		return startErr
+	}
+
+	ctx := args.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	threadID, isNewThread, err := a.ensureThread(ctx, args.ThreadId, args.Model)
+	if err != nil {
+		return err
+	}
+	params.ThreadID = threadID
+
+	if isNewThread {
+		threadStarted := map[string]interface{}{
+			"type":     "thread.started",
+			"threadId": threadID,
+		}
+		line, marshalErr := json.Marshal(threadStarted)
+		if marshalErr == nil {
+			output <- ExecResult{Line: string(line)}
+		}
+	}
+
+	result, err := a.call(ctx, "review/start", params)
+	if err != nil {
+		return err
+	}
+	turnID := extractTurnID(result)
+	if turnID == "" {
+		a.logf("app server: missing review turn id in response")
 	}
 
 	return a.streamTurn(ctx, threadID, turnID, args, output)

@@ -8,6 +8,21 @@ import (
 	"github.com/fanwenlin/codex-go-sdk/types"
 )
 
+type closeTestExec struct {
+	closed bool
+}
+
+func (e *closeTestExec) Run(_ codex.CodexExecArgs) <-chan codex.ExecResult {
+	ch := make(chan codex.ExecResult)
+	close(ch)
+	return ch
+}
+
+func (e *closeTestExec) Close() error {
+	e.closed = true
+	return nil
+}
+
 func TestInputNormalization(t *testing.T) {
 	// Create a thread to test normalization
 	client := codex.NewCodex(types.CodexOptions{})
@@ -153,6 +168,18 @@ func TestCodexClientCreation(t *testing.T) {
 	// Thread ID should be nil initially
 	if thread.ID() != nil {
 		t.Error("Thread ID should be nil before first turn")
+	}
+}
+
+func TestCodexClose(t *testing.T) {
+	exec := &closeTestExec{}
+	client := codex.NewCodexWithExec(exec, types.CodexOptions{})
+
+	if err := client.Close(); err != nil {
+		t.Fatalf("Close() failed: %v", err)
+	}
+	if !exec.closed {
+		t.Fatal("expected Close() to be forwarded to the underlying exec")
 	}
 }
 

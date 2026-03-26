@@ -2,6 +2,7 @@ package codex
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"github.com/fanwenlin/codex-go-sdk/types"
@@ -14,6 +15,14 @@ type Exec interface {
 
 type modelListExec interface {
 	ListModels(ctx context.Context, params types.ModelListParams) (*types.ModelListResponse, error)
+}
+
+type appServerRPCExec interface {
+	RPCCall(ctx context.Context, method string, params interface{}) (json.RawMessage, error)
+}
+
+type closeableExec interface {
+	Close() error
 }
 
 // Codex is the main class for interacting with the Codex agent.
@@ -98,4 +107,37 @@ func (c *Codex) ListModels(ctx context.Context, params types.ModelListParams) (*
 		return exec.ListModels(ctx, params)
 	}
 	return nil, errors.New("model list is only supported by app-server transport")
+}
+
+// AppServerRPC executes an app-server RPC request and returns the raw result payload.
+func (c *Codex) AppServerRPC(ctx context.Context, method string, params interface{}) (json.RawMessage, error) {
+	if exec, ok := c.exec.(appServerRPCExec); ok {
+		return exec.RPCCall(ctx, method, params)
+	}
+	return nil, errors.New("app-server RPC is only supported by app-server transport")
+}
+
+// AppServerRPCTyped executes an app-server RPC request and unmarshals the result into out.
+func (c *Codex) AppServerRPCTyped(ctx context.Context, method string, params interface{}, out interface{}) error {
+	result, err := c.AppServerRPC(ctx, method, params)
+	if err != nil {
+		return err
+	}
+	if out == nil {
+		return nil
+	}
+	return json.Unmarshal(result, out)
+}
+
+// SupportedSlashCommands returns the slash commands implemented by this SDK.
+func (c *Codex) SupportedSlashCommands() []types.SlashCommandInfo {
+	return SupportedSlashCommands()
+}
+
+// Close releases resources held by the underlying transport.
+func (c *Codex) Close() error {
+	if exec, ok := c.exec.(closeableExec); ok {
+		return exec.Close()
+	}
+	return nil
 }
