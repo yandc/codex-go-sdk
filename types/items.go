@@ -115,6 +115,7 @@ func (k *PatchChangeKind) UnmarshalJSON(data []byte) error {
 type FileUpdateChange struct {
 	Path string          `json:"path"`
 	Kind PatchChangeKind `json:"kind"`
+	Diff string          `json:"diff,omitempty"`
 }
 
 // PatchApplyStatus represents the status of a file change.

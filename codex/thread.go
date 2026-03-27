@@ -192,14 +192,15 @@ func extractEventType(line string) (string, error) {
 
 func threadEventFactory(eventType string) (func() types.ThreadEvent, bool) {
 	factories := map[string]func() types.ThreadEvent{
-		"thread.started": func() types.ThreadEvent { return &types.ThreadStartedEvent{} },
-		"turn.started":   func() types.ThreadEvent { return &types.TurnStartedEvent{} },
-		"turn.completed": func() types.ThreadEvent { return &types.TurnCompletedEvent{} },
-		"turn.failed":    func() types.ThreadEvent { return &types.TurnFailedEvent{} },
-		"item.started":   func() types.ThreadEvent { return &types.ItemStartedEvent{} },
-		"item.updated":   func() types.ThreadEvent { return &types.ItemUpdatedEvent{} },
-		"item.completed": func() types.ThreadEvent { return &types.ItemCompletedEvent{} },
-		"error":          func() types.ThreadEvent { return &types.ThreadErrorEvent{} },
+		"thread.started":    func() types.ThreadEvent { return &types.ThreadStartedEvent{} },
+		"turn.started":      func() types.ThreadEvent { return &types.TurnStartedEvent{} },
+		"turn.completed":    func() types.ThreadEvent { return &types.TurnCompletedEvent{} },
+		"turn.failed":       func() types.ThreadEvent { return &types.TurnFailedEvent{} },
+		"turn.diff.updated": func() types.ThreadEvent { return &types.TurnDiffUpdatedEvent{} },
+		"item.started":      func() types.ThreadEvent { return &types.ItemStartedEvent{} },
+		"item.updated":      func() types.ThreadEvent { return &types.ItemUpdatedEvent{} },
+		"item.completed":    func() types.ThreadEvent { return &types.ItemCompletedEvent{} },
+		"error":             func() types.ThreadEvent { return &types.ThreadErrorEvent{} },
 	}
 	factory, ok := factories[eventType]
 	return factory, ok

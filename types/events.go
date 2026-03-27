@@ -78,6 +78,51 @@ func (e TurnCompletedEvent) GetType() string {
 	return e.Type
 }
 
+// TurnDiffUpdatedEvent is emitted when the backend publishes an updated turn diff snapshot.
+type TurnDiffUpdatedEvent struct {
+	// Type is the event type discriminator.
+	Type string `json:"type"`
+	// ThreadId is the identifier of the thread.
+	ThreadId string `json:"threadId,omitempty"`
+	// TurnId is the identifier of the turn.
+	TurnId string `json:"turnId,omitempty"`
+	// Diff contains the latest diff snapshot for the turn.
+	Diff string `json:"diff"`
+}
+
+// UnmarshalJSON supports both camelCase and snake_case fields from different transports.
+func (e *TurnDiffUpdatedEvent) UnmarshalJSON(data []byte) error {
+	var payload struct {
+		Type      string `json:"type"`
+		ThreadID  string `json:"threadId"`
+		ThreadIDS string `json:"thread_id"`
+		TurnID    string `json:"turnId"`
+		TurnIDS   string `json:"turn_id"`
+		Diff      string `json:"diff"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return err
+	}
+	e.Type = payload.Type
+	e.Diff = payload.Diff
+	if payload.ThreadID != "" {
+		e.ThreadId = payload.ThreadID
+	} else {
+		e.ThreadId = payload.ThreadIDS
+	}
+	if payload.TurnID != "" {
+		e.TurnId = payload.TurnID
+	} else {
+		e.TurnId = payload.TurnIDS
+	}
+	return nil
+}
+
+// GetType returns the event type discriminator.
+func (e TurnDiffUpdatedEvent) GetType() string {
+	return e.Type
+}
+
 // ThreadError represents a fatal error emitted by the stream.
 type ThreadError struct {
 	Message string `json:"message"`

@@ -340,7 +340,7 @@ func TestItemStartedEvent_FileChangeKindObject(t *testing.T) {
 			"type": "fileChange",
 			"id": "file-1",
 			"changes": [
-				{"path": "test.go", "kind": {"type": "update", "move_path": "new_test.go"}}
+				{"path": "test.go", "kind": {"type": "update", "move_path": "new_test.go"}, "diff": "@@ -1 +1 @@\n-old\n+new"}
 			],
 			"status": "completed"
 		}
@@ -366,6 +366,39 @@ func TestItemStartedEvent_FileChangeKindObject(t *testing.T) {
 	}
 	if item.Changes[0].Kind.MovePath == nil || *item.Changes[0].Kind.MovePath != "new_test.go" {
 		t.Fatalf("expected move_path %q, got %v", "new_test.go", item.Changes[0].Kind.MovePath)
+	}
+	if item.Changes[0].Diff != "@@ -1 +1 @@\n-old\n+new" {
+		t.Fatalf("expected diff to round-trip, got %q", item.Changes[0].Diff)
+	}
+}
+
+func TestParseThreadEvent_TurnDiffUpdated(t *testing.T) {
+	mockExec := NewMockExec()
+	mockExec.SetEvents([]string{
+		`{"type":"turn.diff.updated","threadId":"thread-1","turnId":"turn-1","diff":"@@ -1 +1 @@\n-old\n+new"}`,
+	})
+	thread := NewTestThread(mockExec)
+	streamed, err := thread.RunStreamed("test", types.TurnOptions{})
+	if err != nil {
+		t.Fatalf("run streamed failed: %v", err)
+	}
+
+	var event types.ThreadEvent
+	for next := range streamed.Events {
+		event = next
+	}
+	diffEvent, ok := event.(*types.TurnDiffUpdatedEvent)
+	if !ok {
+		t.Fatalf("expected TurnDiffUpdatedEvent, got %T", event)
+	}
+	if diffEvent.ThreadId != "thread-1" {
+		t.Fatalf("expected thread id %q, got %q", "thread-1", diffEvent.ThreadId)
+	}
+	if diffEvent.TurnId != "turn-1" {
+		t.Fatalf("expected turn id %q, got %q", "turn-1", diffEvent.TurnId)
+	}
+	if diffEvent.Diff != "@@ -1 +1 @@\n-old\n+new" {
+		t.Fatalf("expected diff body, got %q", diffEvent.Diff)
 	}
 }
 

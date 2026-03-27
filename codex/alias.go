@@ -125,18 +125,19 @@ const (
 
 // Re-export event types.
 type (
-	ThreadEvent        = types.ThreadEvent
-	ThreadStartedEvent = types.ThreadStartedEvent
-	TurnStartedEvent   = types.TurnStartedEvent
-	Usage              = types.Usage
-	TurnCompletedEvent = types.TurnCompletedEvent
-	ThreadError        = types.ThreadError
-	TurnFailedEvent    = types.TurnFailedEvent
-	ItemStartedEvent   = types.ItemStartedEvent
-	ItemUpdatedEvent   = types.ItemUpdatedEvent
-	ItemCompletedEvent = types.ItemCompletedEvent
-	ThreadErrorEvent   = types.ThreadErrorEvent
-	RawEvent           = types.RawEvent
+	ThreadEvent          = types.ThreadEvent
+	ThreadStartedEvent   = types.ThreadStartedEvent
+	TurnStartedEvent     = types.TurnStartedEvent
+	Usage                = types.Usage
+	TurnCompletedEvent   = types.TurnCompletedEvent
+	TurnDiffUpdatedEvent = types.TurnDiffUpdatedEvent
+	ThreadError          = types.ThreadError
+	TurnFailedEvent      = types.TurnFailedEvent
+	ItemStartedEvent     = types.ItemStartedEvent
+	ItemUpdatedEvent     = types.ItemUpdatedEvent
+	ItemCompletedEvent   = types.ItemCompletedEvent
+	ThreadErrorEvent     = types.ThreadErrorEvent
+	RawEvent             = types.RawEvent
 )
 
 // Re-export item types.
