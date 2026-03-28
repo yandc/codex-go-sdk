@@ -638,24 +638,52 @@ func (a *AppServerExec) streamTurn(
 	state := &turnState{
 		items: make(map[string]map[string]interface{}),
 	}
+	interruptCh := ctx.Done()
+	interruptPending := false
 
 	for {
 		select {
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-interruptCh:
+			interruptCh = nil
+			if turnID == "" {
+				return ctx.Err()
+			}
+			interruptCtx, cancel := context.WithTimeout(context.Background(), defaultInterruptTimeout)
+			err := a.interruptTurn(interruptCtx, threadID, turnID)
+			cancel()
+			if err != nil {
+				return err
+			}
+			interruptPending = true
 		case event, ok := <-sub:
 			if !ok {
-				return nil
+				return finishStreamTurn(interruptPending, ctx.Err())
 			}
 			done, err := a.handleTurnEvent(ctx, event, threadID, turnID, args, state, output)
 			if err != nil {
 				return err
 			}
 			if done {
-				return nil
+				return finishStreamTurn(interruptPending, ctx.Err())
 			}
 		}
 	}
+}
+
+func finishStreamTurn(interruptPending bool, cancelErr error) error {
+	if interruptPending {
+		return cancelErr
+	}
+	return nil
+}
+
+func (a *AppServerExec) interruptTurn(ctx context.Context, threadID string, turnID string) error {
+	a.logf("app server: interrupting turn %s in thread %s", turnID, threadID)
+	_, err := a.call(ctx, "turn/interrupt", map[string]interface{}{
+		"threadId": threadID,
+		"turnId":   turnID,
+	})
+	return err
 }
 
 func isApprovalRequestedEvent(method string) bool {
@@ -668,6 +696,7 @@ var codexSDKVersion string
 const (
 	appServerSubscriberBuffer = 256
 	defaultInitTimeout        = 10 * time.Second
+	defaultInterruptTimeout   = 5 * time.Second
 )
 
 func (a *AppServerExec) ensureThread(ctx context.Context, requested *string, model string) (string, bool, error) {
