@@ -503,7 +503,7 @@ func (a *AppServerExec) runTurn(args CodexExecArgs, output chan ExecResult) erro
 		ctx = context.Background()
 	}
 
-	threadID, isNewThread, err := a.ensureThread(ctx, args.ThreadId, args.Model)
+	threadID, isNewThread, err := a.ensureThread(ctx, args.ThreadId, args.Model, args.WorkingDirectory)
 	if err != nil {
 		return err
 	}
@@ -547,7 +547,7 @@ func (a *AppServerExec) runReview(
 		ctx = context.Background()
 	}
 
-	threadID, isNewThread, err := a.ensureThread(ctx, args.ThreadId, args.Model)
+	threadID, isNewThread, err := a.ensureThread(ctx, args.ThreadId, args.Model, args.WorkingDirectory)
 	if err != nil {
 		return err
 	}
@@ -699,12 +699,9 @@ const (
 	defaultInterruptTimeout   = 5 * time.Second
 )
 
-func (a *AppServerExec) ensureThread(ctx context.Context, requested *string, model string) (string, bool, error) {
+func (a *AppServerExec) ensureThread(ctx context.Context, requested *string, model string, workingDirectory string) (string, bool, error) {
 	if requested == nil || *requested == "" {
-		params := map[string]interface{}{}
-		if model != "" {
-			params["model"] = model
-		}
+		params := buildThreadStartParams(model, workingDirectory)
 		result, err := a.call(ctx, "thread/start", params)
 		if err != nil {
 			return "", false, err
@@ -724,9 +721,7 @@ func (a *AppServerExec) ensureThread(ctx context.Context, requested *string, mod
 	_, known := a.knownThreads[threadID]
 	a.knownThreadsMu.Unlock()
 	if !known {
-		_, err := a.call(ctx, "thread/resume", map[string]interface{}{
-			"threadId": threadID,
-		})
+		_, err := a.call(ctx, "thread/resume", buildThreadResumeParams(threadID, workingDirectory))
 		if err != nil {
 			return "", false, err
 		}
@@ -735,6 +730,27 @@ func (a *AppServerExec) ensureThread(ctx context.Context, requested *string, mod
 		a.knownThreadsMu.Unlock()
 	}
 	return threadID, false, nil
+}
+
+func buildThreadStartParams(model string, workingDirectory string) map[string]interface{} {
+	params := map[string]interface{}{}
+	if model != "" {
+		params["model"] = model
+	}
+	if workingDirectory != "" {
+		params["cwd"] = workingDirectory
+	}
+	return params
+}
+
+func buildThreadResumeParams(threadID string, workingDirectory string) map[string]interface{} {
+	params := map[string]interface{}{
+		"threadId": threadID,
+	}
+	if workingDirectory != "" {
+		params["cwd"] = workingDirectory
+	}
+	return params
 }
 
 type turnState struct {

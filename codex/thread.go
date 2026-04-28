@@ -408,10 +408,10 @@ func (t *Thread) ensureAppServerThread(ctx context.Context) (string, error) {
 		return *t.id, nil
 	}
 
-	params := map[string]interface{}{}
-	if model := strings.TrimSpace(t.threadOptions.Model); model != "" {
-		params["model"] = model
-	}
+	params := buildThreadStartParams(
+		strings.TrimSpace(t.threadOptions.Model),
+		strings.TrimSpace(t.threadOptions.WorkingDirectory),
+	)
 
 	var response struct {
 		Thread struct {
