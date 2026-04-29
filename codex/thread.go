@@ -164,6 +164,12 @@ func parseThreadEvent(line string) (types.ThreadEvent, error) {
 		return nil, err
 	}
 	normalizedType := strings.ReplaceAll(eventType, "/", ".")
+	if normalizedType == "error" && !hasThreadErrorMessage(line) {
+		return &types.RawEvent{
+			Type: eventType,
+			Raw:  json.RawMessage(line),
+		}, nil
+	}
 	if factory, ok := threadEventFactory(normalizedType); ok {
 		event := factory()
 		if unmarshalErr := json.Unmarshal([]byte(line), event); unmarshalErr != nil {
@@ -175,6 +181,22 @@ func parseThreadEvent(line string) (types.ThreadEvent, error) {
 		Type: eventType,
 		Raw:  json.RawMessage(line),
 	}, nil
+}
+
+func hasThreadErrorMessage(line string) bool {
+	var payload struct {
+		Message string `json:"message"`
+		Error   *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(line), &payload); err != nil {
+		return false
+	}
+	if strings.TrimSpace(payload.Message) != "" {
+		return true
+	}
+	return payload.Error != nil && strings.TrimSpace(payload.Error.Message) != ""
 }
 
 func extractEventType(line string) (string, error) {

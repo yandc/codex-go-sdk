@@ -874,11 +874,11 @@ func eventMatchesTurn(event appEvent, threadID string, turnID string) bool {
 	if meta.TurnID == "" && meta.Turn != nil {
 		meta.TurnID = meta.Turn.ID
 	}
+	if threadID != "" && meta.ThreadID == threadID {
+		return true
+	}
 	if turnID != "" && meta.TurnID != "" {
 		return meta.TurnID == turnID
-	}
-	if threadID != "" && meta.ThreadID != "" {
-		return meta.ThreadID == threadID
 	}
 	return false
 }
