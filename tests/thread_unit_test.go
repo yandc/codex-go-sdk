@@ -690,6 +690,30 @@ func TestItemStartedEvent_ErrorItem(t *testing.T) {
 	}
 }
 
+func TestThreadErrorEvent_AppServerShape(t *testing.T) {
+	payload := []byte(`{
+		"type": "error",
+		"willRetry": false,
+		"error": {
+			"message": "stream failed"
+		}
+	}`)
+
+	var event types.ThreadErrorEvent
+	if err := json.Unmarshal(payload, &event); err != nil {
+		t.Fatalf("unmarshal ThreadErrorEvent failed: %v", err)
+	}
+	if event.Message != "stream failed" {
+		t.Fatalf("expected flattened message %q, got %q", "stream failed", event.Message)
+	}
+	if event.Error == nil || event.Error.Message != "stream failed" {
+		t.Fatalf("expected structured error to be preserved, got %#v", event.Error)
+	}
+	if event.WillRetry {
+		t.Fatal("expected willRetry=false")
+	}
+}
+
 func TestItemStartedEvent_UserMessage(t *testing.T) {
 	payload := []byte(`{
 		"type": "item.started",

@@ -219,6 +219,33 @@ type ThreadErrorEvent struct {
 	Type string `json:"type"`
 	// Message is the error message
 	Message string `json:"message"`
+	// Error contains structured error details when emitted by app-server.
+	Error *ThreadError `json:"error,omitempty"`
+	// WillRetry reports whether app-server considers this an intermediate
+	// stream error that it will retry internally.
+	WillRetry bool `json:"willRetry,omitempty"`
+}
+
+// UnmarshalJSON supports both legacy top-level message errors and app-server
+// error notifications where the message is nested under error.message.
+func (e *ThreadErrorEvent) UnmarshalJSON(data []byte) error {
+	var payload struct {
+		Type      string       `json:"type"`
+		Message   string       `json:"message"`
+		Error     *ThreadError `json:"error"`
+		WillRetry bool         `json:"willRetry"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return err
+	}
+	e.Type = payload.Type
+	e.Message = payload.Message
+	e.Error = payload.Error
+	e.WillRetry = payload.WillRetry
+	if e.Message == "" && payload.Error != nil {
+		e.Message = payload.Error.Message
+	}
+	return nil
 }
 
 // GetType returns the event type discriminator

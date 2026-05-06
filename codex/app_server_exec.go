@@ -802,6 +802,11 @@ func appEventToLegacyLine(event appEvent, state *turnState) (string, bool, error
 			return "", false, unmarshalErr
 		}
 	}
+	if method == "error" {
+		if willRetry, _ := payload["willRetry"].(bool); willRetry {
+			return "", false, nil
+		}
+	}
 	payload["type"] = strings.ReplaceAll(method, "/", ".")
 
 	if itemPayload, ok := payload["item"].(map[string]interface{}); ok {
