@@ -798,7 +798,11 @@ func (a *AppServerExec) currentModelProvider(ctx context.Context, workingDirecto
 	if err := json.Unmarshal(result, &response); err != nil {
 		return "", fmt.Errorf("failed to parse current Codex config for thread resume: %w", err)
 	}
-	return strings.TrimSpace(response.Config.ModelProvider), nil
+	currentProvider := strings.TrimSpace(response.Config.ModelProvider)
+	if currentProvider == "" {
+		currentProvider = "openai"
+	}
+	return currentProvider, nil
 }
 
 type turnState struct {
