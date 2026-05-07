@@ -135,6 +135,7 @@ func (t *Thread) buildExecArgs(
 		ThreadId:              threadID,
 		Images:                images,
 		Model:                 options.Model,
+		ModelProvider:         options.ModelProvider,
 		SandboxMode:           string(options.SandboxMode),
 		WorkingDirectory:      options.WorkingDirectory,
 		SkipGitRepoCheck:      options.SkipGitRepoCheck,
@@ -432,6 +433,7 @@ func (t *Thread) ensureAppServerThread(ctx context.Context) (string, error) {
 
 	params := buildThreadStartParams(
 		strings.TrimSpace(t.threadOptions.Model),
+		strings.TrimSpace(t.threadOptions.ModelProvider),
 		strings.TrimSpace(t.threadOptions.WorkingDirectory),
 	)
 

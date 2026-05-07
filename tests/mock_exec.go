@@ -90,6 +90,13 @@ func buildCommandArgs(args codex.CodexExecArgs) []string {
 	if args.OutputSchemaFile != "" {
 		cmdArgs = append(cmdArgs, "--output-schema", args.OutputSchemaFile)
 	}
+	if args.ModelProvider != "" {
+		cmdArgs = append(
+			cmdArgs,
+			"--config",
+			fmt.Sprintf(`model_provider="%s"`, args.ModelProvider),
+		)
+	}
 	if args.ModelReasoningEffort != "" {
 		cmdArgs = append(
 			cmdArgs,

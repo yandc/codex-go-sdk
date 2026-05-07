@@ -106,6 +106,11 @@ type CodexOptions struct {
 type ThreadOptions struct {
 	// Model is the model to use
 	Model string
+	// ModelProvider is the model provider to use.
+	// When resuming with the app-server transport and this is empty, the SDK
+	// uses the current effective config's model_provider instead of the
+	// provider persisted on the old thread.
+	ModelProvider string
 	// SandboxMode is the sandbox access mode
 	SandboxMode SandboxMode
 	// WorkingDirectory is the working directory for the thread

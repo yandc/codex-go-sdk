@@ -503,7 +503,7 @@ func (a *AppServerExec) runTurn(args CodexExecArgs, output chan ExecResult) erro
 		ctx = context.Background()
 	}
 
-	threadID, isNewThread, err := a.ensureThread(ctx, args.ThreadId, args.Model, args.WorkingDirectory)
+	threadID, isNewThread, err := a.ensureThread(ctx, args)
 	if err != nil {
 		return err
 	}
@@ -547,7 +547,7 @@ func (a *AppServerExec) runReview(
 		ctx = context.Background()
 	}
 
-	threadID, isNewThread, err := a.ensureThread(ctx, args.ThreadId, args.Model, args.WorkingDirectory)
+	threadID, isNewThread, err := a.ensureThread(ctx, args)
 	if err != nil {
 		return err
 	}
@@ -699,9 +699,10 @@ const (
 	defaultInterruptTimeout   = 5 * time.Second
 )
 
-func (a *AppServerExec) ensureThread(ctx context.Context, requested *string, model string, workingDirectory string) (string, bool, error) {
+func (a *AppServerExec) ensureThread(ctx context.Context, args CodexExecArgs) (string, bool, error) {
+	requested := args.ThreadId
 	if requested == nil || *requested == "" {
-		params := buildThreadStartParams(model, workingDirectory)
+		params := buildThreadStartParams(args.Model, args.ModelProvider, args.WorkingDirectory)
 		result, err := a.call(ctx, "thread/start", params)
 		if err != nil {
 			return "", false, err
@@ -721,7 +722,11 @@ func (a *AppServerExec) ensureThread(ctx context.Context, requested *string, mod
 	_, known := a.knownThreads[threadID]
 	a.knownThreadsMu.Unlock()
 	if !known {
-		_, err := a.call(ctx, "thread/resume", buildThreadResumeParams(threadID, workingDirectory))
+		params, paramsErr := a.buildThreadResumeParams(ctx, threadID, args)
+		if paramsErr != nil {
+			return "", false, paramsErr
+		}
+		_, err := a.call(ctx, "thread/resume", params)
 		if err != nil {
 			return "", false, err
 		}
@@ -732,10 +737,13 @@ func (a *AppServerExec) ensureThread(ctx context.Context, requested *string, mod
 	return threadID, false, nil
 }
 
-func buildThreadStartParams(model string, workingDirectory string) map[string]interface{} {
+func buildThreadStartParams(model string, modelProvider string, workingDirectory string) map[string]interface{} {
 	params := map[string]interface{}{}
 	if model != "" {
 		params["model"] = model
+	}
+	if modelProvider != "" {
+		params["modelProvider"] = modelProvider
 	}
 	if workingDirectory != "" {
 		params["cwd"] = workingDirectory
@@ -743,14 +751,54 @@ func buildThreadStartParams(model string, workingDirectory string) map[string]in
 	return params
 }
 
-func buildThreadResumeParams(threadID string, workingDirectory string) map[string]interface{} {
+func (a *AppServerExec) buildThreadResumeParams(ctx context.Context, threadID string, args CodexExecArgs) (map[string]interface{}, error) {
+	modelProvider := strings.TrimSpace(args.ModelProvider)
+	if modelProvider == "" {
+		var err error
+		modelProvider, err = a.currentModelProvider(ctx, args.WorkingDirectory)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return buildThreadResumeParams(threadID, args.Model, modelProvider, args.WorkingDirectory), nil
+}
+
+func buildThreadResumeParams(threadID string, model string, modelProvider string, workingDirectory string) map[string]interface{} {
 	params := map[string]interface{}{
 		"threadId": threadID,
+	}
+	if model != "" {
+		params["model"] = model
+	}
+	if modelProvider != "" {
+		params["modelProvider"] = modelProvider
 	}
 	if workingDirectory != "" {
 		params["cwd"] = workingDirectory
 	}
 	return params
+}
+
+func (a *AppServerExec) currentModelProvider(ctx context.Context, workingDirectory string) (string, error) {
+	params := map[string]interface{}{
+		"includeLayers": false,
+	}
+	if workingDirectory != "" {
+		params["cwd"] = workingDirectory
+	}
+	result, err := a.call(ctx, "config/read", params)
+	if err != nil {
+		return "", fmt.Errorf("failed to read current Codex config for thread resume: %w", err)
+	}
+	var response struct {
+		Config struct {
+			ModelProvider string `json:"model_provider"`
+		} `json:"config"`
+	}
+	if err := json.Unmarshal(result, &response); err != nil {
+		return "", fmt.Errorf("failed to parse current Codex config for thread resume: %w", err)
+	}
+	return strings.TrimSpace(response.Config.ModelProvider), nil
 }
 
 type turnState struct {

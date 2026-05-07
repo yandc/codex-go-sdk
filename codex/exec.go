@@ -34,6 +34,7 @@ type CodexExecArgs struct {
 	ThreadId              *string
 	Images                []string
 	Model                 string
+	ModelProvider         string
 	SandboxMode           string
 	WorkingDirectory      string
 	AdditionalDirectories []string
@@ -311,6 +312,13 @@ func appendFeatureArgs(commandArgs []string, args CodexExecArgs) []string {
 }
 
 func appendConfigArgs(commandArgs []string, args CodexExecArgs) []string {
+	if args.ModelProvider != "" {
+		commandArgs = append(
+			commandArgs,
+			"--config",
+			fmt.Sprintf(`model_provider="%s"`, args.ModelProvider),
+		)
+	}
 	if args.ModelReasoningEffort != "" {
 		commandArgs = append(
 			commandArgs,
