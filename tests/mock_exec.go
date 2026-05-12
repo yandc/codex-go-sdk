@@ -104,6 +104,20 @@ func buildCommandArgs(args codex.CodexExecArgs) []string {
 			fmt.Sprintf(`model_reasoning_effort="%s"`, args.ModelReasoningEffort),
 		)
 	}
+	switch args.FastService {
+	case "on":
+		cmdArgs = append(
+			cmdArgs,
+			"--config",
+			`service_tier="fast"`,
+		)
+	case "off":
+		cmdArgs = append(
+			cmdArgs,
+			"--config",
+			"service_tier=null",
+		)
+	}
 	if args.NetworkAccessEnabled {
 		cmdArgs = append(
 			cmdArgs,

@@ -181,6 +181,7 @@ Notes:
 - `WorkingDirectory`: Working directory (`cwd`) used by the agent.
 - `SkipGitRepoCheck`: Skip git repository check (CLI transport only).
 - `DisableSkills`: Disable skills feature (CLI transport only).
+- `FastService`: Fast service mode string. Use `on` to force fast service, `off` to explicitly clear it, or leave empty to omit `service_tier`.
 - `ModelReasoningEffort`: Reasoning effort (`minimal`, `low`, `medium`, `high`, `xhigh`).
 - `NetworkAccessEnabled`: Enable network access in sandbox policy/config.
 - `WebSearchMode`: Web search mode (`disabled`, `cached`, `live`), mainly for CLI transport.

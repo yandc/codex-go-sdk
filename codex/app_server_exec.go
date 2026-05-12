@@ -601,6 +601,12 @@ func (a *AppServerExec) buildTurnParams(threadID string, args CodexExecArgs) (ma
 	if args.Model != "" {
 		turnParams["model"] = args.Model
 	}
+	switch normalizeFastService(args.FastService) {
+	case "on":
+		turnParams["serviceTier"] = "fast"
+	case "off":
+		turnParams["serviceTier"] = nil
+	}
 	if args.ModelReasoningEffort != "" {
 		turnParams["effort"] = args.ModelReasoningEffort
 	}
@@ -702,7 +708,7 @@ const (
 func (a *AppServerExec) ensureThread(ctx context.Context, args CodexExecArgs) (string, bool, error) {
 	requested := args.ThreadId
 	if requested == nil || *requested == "" {
-		params := buildThreadStartParams(args.Model, args.ModelProvider, args.WorkingDirectory)
+		params := buildThreadStartParams(args.Model, args.ModelProvider, args.FastService, args.WorkingDirectory)
 		result, err := a.call(ctx, "thread/start", params)
 		if err != nil {
 			return "", false, err
@@ -737,13 +743,19 @@ func (a *AppServerExec) ensureThread(ctx context.Context, args CodexExecArgs) (s
 	return threadID, false, nil
 }
 
-func buildThreadStartParams(model string, modelProvider string, workingDirectory string) map[string]interface{} {
+func buildThreadStartParams(model string, modelProvider string, fastService string, workingDirectory string) map[string]interface{} {
 	params := map[string]interface{}{}
 	if model != "" {
 		params["model"] = model
 	}
 	if modelProvider != "" {
 		params["modelProvider"] = modelProvider
+	}
+	switch normalizeFastService(fastService) {
+	case "on":
+		params["serviceTier"] = "fast"
+	case "off":
+		params["serviceTier"] = nil
 	}
 	if workingDirectory != "" {
 		params["cwd"] = workingDirectory
@@ -760,10 +772,10 @@ func (a *AppServerExec) buildThreadResumeParams(ctx context.Context, threadID st
 			return nil, err
 		}
 	}
-	return buildThreadResumeParams(threadID, args.Model, modelProvider, args.WorkingDirectory), nil
+	return buildThreadResumeParams(threadID, args.Model, modelProvider, args.FastService, args.WorkingDirectory), nil
 }
 
-func buildThreadResumeParams(threadID string, model string, modelProvider string, workingDirectory string) map[string]interface{} {
+func buildThreadResumeParams(threadID string, model string, modelProvider string, fastService string, workingDirectory string) map[string]interface{} {
 	params := map[string]interface{}{
 		"threadId": threadID,
 	}
@@ -772,6 +784,12 @@ func buildThreadResumeParams(threadID string, model string, modelProvider string
 	}
 	if modelProvider != "" {
 		params["modelProvider"] = modelProvider
+	}
+	switch normalizeFastService(fastService) {
+	case "on":
+		params["serviceTier"] = "fast"
+	case "off":
+		params["serviceTier"] = nil
 	}
 	if workingDirectory != "" {
 		params["cwd"] = workingDirectory

@@ -109,6 +109,15 @@ func (c *Codex) ListModels(ctx context.Context, params types.ModelListParams) (*
 	return nil, errors.New("model list is only supported by app-server transport")
 }
 
+// ReadConfig queries the app-server effective configuration snapshot.
+func (c *Codex) ReadConfig(ctx context.Context, params types.ConfigReadParams) (*types.ConfigReadResponse, error) {
+	var response types.ConfigReadResponse
+	if err := c.AppServerRPCTyped(ctx, "config/read", params, &response); err != nil {
+		return nil, err
+	}
+	return &response, nil
+}
+
 // AppServerRPC executes an app-server RPC request and returns the raw result payload.
 func (c *Codex) AppServerRPC(ctx context.Context, method string, params interface{}) (json.RawMessage, error) {
 	if exec, ok := c.exec.(appServerRPCExec); ok {

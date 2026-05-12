@@ -119,6 +119,12 @@ type ThreadOptions struct {
 	SkipGitRepoCheck bool
 	// DisableSkills disables the Codex CLI skills feature.
 	DisableSkills bool
+	// FastService controls Codex fast service behavior.
+	// Supported values:
+	//   ""    - leave service_tier unspecified
+	//   "on"  - force service_tier="fast"
+	//   "off" - explicitly clear service_tier
+	FastService string
 	// ModelReasoningEffort is the reasoning effort for the model
 	ModelReasoningEffort ModelReasoningEffort
 	// NetworkAccessEnabled enables network access

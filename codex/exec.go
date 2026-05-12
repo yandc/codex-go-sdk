@@ -41,6 +41,7 @@ type CodexExecArgs struct {
 	SkipGitRepoCheck      bool
 	DisableSkills         bool
 	OutputSchemaFile      string
+	FastService           string
 	ModelReasoningEffort  string
 	Context               context.Context
 	NetworkAccessEnabled  bool
@@ -324,6 +325,20 @@ func appendConfigArgs(commandArgs []string, args CodexExecArgs) []string {
 			commandArgs,
 			"--config",
 			fmt.Sprintf(`model_reasoning_effort="%s"`, args.ModelReasoningEffort),
+		)
+	}
+	switch normalizeFastService(args.FastService) {
+	case "off":
+		commandArgs = append(
+			commandArgs,
+			"--config",
+			"service_tier=null",
+		)
+	case "on":
+		commandArgs = append(
+			commandArgs,
+			"--config",
+			`service_tier="fast"`,
 		)
 	}
 	if args.NetworkAccessEnabled {
@@ -637,4 +652,15 @@ func vendorBinaryPath(vendorRoot, targetTriple, binaryName string) string {
 func fileExists(path string) bool {
 	_, statErr := os.Stat(path)
 	return statErr == nil
+}
+
+func normalizeFastService(value string) string {
+	switch strings.TrimSpace(value) {
+	case "on":
+		return "on"
+	case "off":
+		return "off"
+	default:
+		return ""
+	}
 }

@@ -64,6 +64,34 @@ func TestWebSearchTrue(t *testing.T) {
 	}
 }
 
+func TestFastServiceForwarding(t *testing.T) {
+	mockExec := NewMockExec()
+	mockExec.SetEvents([]string{`{"type":"thread.started","threadId":"test"}`})
+
+	client := codex.NewCodexWithExec(mockExec, types.CodexOptions{})
+	thread := client.StartThread(types.ThreadOptions{
+		FastService: "on",
+	})
+
+	_, _ = thread.Run("test", types.TurnOptions{})
+
+	args := mockExec.GetArgs()
+	if len(args) == 0 {
+		t.Fatal("No args captured")
+	}
+
+	found := false
+	for _, arg := range args[0] {
+		if strings.Contains(arg, `service_tier="fast"`) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error(`Expected service_tier="fast" not found`)
+	}
+}
+
 func TestImagesForwarding(t *testing.T) {
 	mockExec := NewMockExec()
 	mockExec.SetEvents([]string{`{"type":"thread.started","threadId":"test"}`})

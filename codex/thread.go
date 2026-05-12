@@ -141,6 +141,7 @@ func (t *Thread) buildExecArgs(
 		SkipGitRepoCheck:      options.SkipGitRepoCheck,
 		DisableSkills:         options.DisableSkills,
 		OutputSchemaFile:      schemaPath,
+		FastService:           options.FastService,
 		ModelReasoningEffort:  string(options.ModelReasoningEffort),
 		Context:               ctx,
 		NetworkAccessEnabled:  options.NetworkAccessEnabled,
@@ -434,6 +435,7 @@ func (t *Thread) ensureAppServerThread(ctx context.Context) (string, error) {
 	params := buildThreadStartParams(
 		strings.TrimSpace(t.threadOptions.Model),
 		strings.TrimSpace(t.threadOptions.ModelProvider),
+		t.threadOptions.FastService,
 		strings.TrimSpace(t.threadOptions.WorkingDirectory),
 	)
 

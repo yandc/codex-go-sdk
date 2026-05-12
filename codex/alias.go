@@ -187,6 +187,12 @@ type (
 	ModelListParams = types.ModelListParams
 	// ModelListResponse contains paginated model catalog results.
 	ModelListResponse = types.ModelListResponse
+	// ConfigReadParams configures config/read.
+	ConfigReadParams = types.ConfigReadParams
+	// EffectiveConfig is the current effective app-server config snapshot.
+	EffectiveConfig = types.EffectiveConfig
+	// ConfigReadResponse contains the app-server config/read response.
+	ConfigReadResponse = types.ConfigReadResponse
 	// GetAccountParams configures account/read.
 	GetAccountParams = types.GetAccountParams
 	// GetAccountResponse contains the account/read response.
