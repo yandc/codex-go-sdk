@@ -17,6 +17,14 @@ type reviewExec interface {
 	RunReview(args CodexExecArgs, params types.ReviewStartParams) <-chan ExecResult
 }
 
+type shellCommandExec interface {
+	RunShellCommand(args CodexExecArgs, command string) <-chan ExecResult
+}
+
+type goalSetExec interface {
+	RunGoalSet(args CodexExecArgs, params types.ThreadGoalSetParams) <-chan ExecResult
+}
+
 var syntheticTurnCounter uint64
 
 // Thread represents a conversation thread with the agent.
@@ -221,10 +229,16 @@ func threadEventFactory(eventType string) (func() types.ThreadEvent, bool) {
 		"turn.completed":    func() types.ThreadEvent { return &types.TurnCompletedEvent{} },
 		"turn.failed":       func() types.ThreadEvent { return &types.TurnFailedEvent{} },
 		"turn.diff.updated": func() types.ThreadEvent { return &types.TurnDiffUpdatedEvent{} },
-		"item.started":      func() types.ThreadEvent { return &types.ItemStartedEvent{} },
-		"item.updated":      func() types.ThreadEvent { return &types.ItemUpdatedEvent{} },
-		"item.completed":    func() types.ThreadEvent { return &types.ItemCompletedEvent{} },
-		"error":             func() types.ThreadEvent { return &types.ThreadErrorEvent{} },
+		"thread.goal.updated": func() types.ThreadEvent {
+			return &types.ThreadGoalUpdatedEvent{}
+		},
+		"thread.goal.cleared": func() types.ThreadEvent {
+			return &types.ThreadGoalClearedEvent{}
+		},
+		"item.started":   func() types.ThreadEvent { return &types.ItemStartedEvent{} },
+		"item.updated":   func() types.ThreadEvent { return &types.ItemUpdatedEvent{} },
+		"item.completed": func() types.ThreadEvent { return &types.ItemCompletedEvent{} },
+		"error":          func() types.ThreadEvent { return &types.ThreadErrorEvent{} },
 	}
 	factory, ok := factories[eventType]
 	return factory, ok
@@ -296,6 +310,10 @@ func (t *Thread) runSlashStreamed(
 		return t.runStatusCommandStreamed(turnOptions)
 	case "compact":
 		return t.runCompactCommandStreamed(turnOptions)
+	case "goal":
+		return t.runGoalCommandStreamed(cmd, turnOptions)
+	case "shell":
+		return t.runShellCommandStreamed(cmd, turnOptions)
 	default:
 		return t.runStandardPromptStreamed("/"+cmd.name, turnOptions)
 	}
@@ -369,6 +387,53 @@ func (t *Thread) runReviewCommandStreamed(
 	return &types.StreamedTurn{Events: events}, nil
 }
 
+func (t *Thread) runShellCommandStreamed(
+	cmd *slashCommand,
+	turnOptions types.TurnOptions,
+) (*types.StreamedTurn, error) {
+	command := strings.TrimSpace(cmd.args)
+	if command == "" {
+		return nil, fmt.Errorf("/shell requires a command")
+	}
+
+	runner, ok := t.exec.(shellCommandExec)
+	if !ok {
+		return nil, fmt.Errorf("/shell requires app-server transport")
+	}
+
+	ctx := resolveTurnContext(turnOptions)
+	args := t.buildExecArgs(ctx, "", nil, nil, "")
+	events := make(chan types.ThreadEvent)
+
+	go func() {
+		defer close(events)
+		resultChan := runner.RunShellCommand(args, command)
+		for result := range resultChan {
+			event, eventErr := t.processExecResult(result)
+			if eventErr != nil {
+				events <- &types.ThreadErrorEvent{
+					Type:    "error",
+					Message: eventErr.Error(),
+				}
+				return
+			}
+			if event == nil {
+				continue
+			}
+			if threadStarted, ok := event.(*types.ThreadStartedEvent); ok {
+				t.id = &threadStarted.ThreadId
+			}
+			select {
+			case events <- event:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	return &types.StreamedTurn{Events: events}, nil
+}
+
 func (t *Thread) runStatusCommandStreamed(
 	turnOptions types.TurnOptions,
 ) (*types.StreamedTurn, error) {
@@ -406,6 +471,128 @@ func (t *Thread) runCompactCommandStreamed(
 	}
 
 	return t.syntheticMessageStream(ctx, "Started context compaction for this thread."), nil
+}
+
+func (t *Thread) runGoalCommandStreamed(
+	cmd *slashCommand,
+	turnOptions types.TurnOptions,
+) (*types.StreamedTurn, error) {
+	ctx := resolveTurnContext(turnOptions)
+	args := strings.TrimSpace(cmd.args)
+	if args == "" {
+		threadID, err := t.ensureAppServerThread(ctx)
+		if err != nil {
+			return nil, err
+		}
+		var response types.ThreadGoalGetResponse
+		if err := t.appServerRPCTyped(ctx, "thread/goal/get", types.ThreadGoalGetParams{
+			ThreadID: threadID,
+		}, &response); err != nil {
+			return nil, err
+		}
+		return t.syntheticMessageStream(ctx, formatGoalMessage(response.Goal)), nil
+	}
+
+	switch strings.ToLower(args) {
+	case "clear":
+		threadID, err := t.ensureAppServerThread(ctx)
+		if err != nil {
+			return nil, err
+		}
+		var response types.ThreadGoalClearResponse
+		if err := t.appServerRPCTyped(ctx, "thread/goal/clear", types.ThreadGoalClearParams{
+			ThreadID: threadID,
+		}, &response); err != nil {
+			return nil, err
+		}
+		if response.Cleared {
+			return t.syntheticMessageStream(ctx, "Cleared the active goal."), nil
+		}
+		return t.syntheticMessageStream(ctx, "No active goal to clear."), nil
+	case "pause":
+		threadID, err := t.ensureAppServerThread(ctx)
+		if err != nil {
+			return nil, err
+		}
+		status := types.ThreadGoalStatusPaused
+		return t.setGoalStatusStreamed(ctx, threadID, status)
+	case "resume":
+		status := types.ThreadGoalStatusActive
+		return t.setActiveGoalStreamed(ctx, types.ThreadGoalSetParams{Status: &status})
+	case "edit":
+		return t.syntheticMessageStream(ctx, "Use /goal <objective> to replace the current goal."), nil
+	default:
+		objective := args
+		status := types.ThreadGoalStatusActive
+		return t.setActiveGoalStreamed(ctx, types.ThreadGoalSetParams{
+			Objective: &objective,
+			Status:    &status,
+		})
+	}
+}
+
+func (t *Thread) setActiveGoalStreamed(
+	ctx context.Context,
+	params types.ThreadGoalSetParams,
+) (*types.StreamedTurn, error) {
+	if runner, ok := t.exec.(goalSetExec); ok {
+		args := t.buildExecArgs(ctx, "", nil, nil, "")
+		events := make(chan types.ThreadEvent)
+
+		go func() {
+			defer close(events)
+			resultChan := runner.RunGoalSet(args, params)
+			for result := range resultChan {
+				event, eventErr := t.processExecResult(result)
+				if eventErr != nil {
+					events <- &types.ThreadErrorEvent{
+						Type:    "error",
+						Message: eventErr.Error(),
+					}
+					return
+				}
+				if event == nil {
+					continue
+				}
+				if threadStarted, ok := event.(*types.ThreadStartedEvent); ok {
+					t.id = &threadStarted.ThreadId
+				}
+				select {
+				case events <- event:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+
+		return &types.StreamedTurn{Events: events}, nil
+	}
+
+	threadID, err := t.ensureAppServerThread(ctx)
+	if err != nil {
+		return nil, err
+	}
+	params.ThreadID = threadID
+	var response types.ThreadGoalSetResponse
+	if err := t.appServerRPCTyped(ctx, "thread/goal/set", params, &response); err != nil {
+		return nil, err
+	}
+	return t.syntheticMessageStream(ctx, formatGoalUpdatedMessage(&response.Goal)), nil
+}
+
+func (t *Thread) setGoalStatusStreamed(
+	ctx context.Context,
+	threadID string,
+	status types.ThreadGoalStatus,
+) (*types.StreamedTurn, error) {
+	var response types.ThreadGoalSetResponse
+	if err := t.appServerRPCTyped(ctx, "thread/goal/set", types.ThreadGoalSetParams{
+		ThreadID: threadID,
+		Status:   &status,
+	}, &response); err != nil {
+		return nil, err
+	}
+	return t.syntheticMessageStream(ctx, formatGoalUpdatedMessage(&response.Goal)), nil
 }
 
 func (t *Thread) appServerRPCTyped(
@@ -556,6 +743,60 @@ func formatStatusMessage(
 	parts = append(parts, rateLimitLines...)
 
 	return strings.Join(parts, "\n")
+}
+
+func formatGoalMessage(goal *types.ThreadGoal) string {
+	if goal == nil {
+		return "No active goal."
+	}
+	return formatGoalUpdatedMessage(goal)
+}
+
+func formatGoalUpdatedMessage(goal *types.ThreadGoal) string {
+	if goal == nil {
+		return "Goal updated."
+	}
+	var parts []string
+	parts = append(parts, fmt.Sprintf("Goal: %s", goal.Objective))
+	parts = append(parts, fmt.Sprintf("Status: %s", goal.Status))
+	if goal.TokenBudget != nil && *goal.TokenBudget > 0 {
+		parts = append(parts, fmt.Sprintf("Tokens: %d / %d", goal.TokensUsed, *goal.TokenBudget))
+	} else if goal.TokensUsed > 0 {
+		parts = append(parts, fmt.Sprintf("Tokens used: %d", goal.TokensUsed))
+	}
+	if goal.TimeUsedSeconds > 0 {
+		parts = append(parts, fmt.Sprintf("Elapsed: %s", formatGoalElapsed(goal.TimeUsedSeconds)))
+	}
+	return strings.Join(parts, "\n")
+}
+
+func formatGoalElapsed(seconds int64) string {
+	if seconds <= 0 {
+		return "0s"
+	}
+	duration := time.Duration(seconds) * time.Second
+	days := duration / (24 * time.Hour)
+	duration %= 24 * time.Hour
+	hours := duration / time.Hour
+	duration %= time.Hour
+	minutes := duration / time.Minute
+	duration %= time.Minute
+	secs := duration / time.Second
+
+	var parts []string
+	if days > 0 {
+		parts = append(parts, fmt.Sprintf("%dd", days))
+	}
+	if hours > 0 {
+		parts = append(parts, fmt.Sprintf("%dh", hours))
+	}
+	if minutes > 0 {
+		parts = append(parts, fmt.Sprintf("%dm", minutes))
+	}
+	if secs > 0 && len(parts) == 0 {
+		parts = append(parts, fmt.Sprintf("%ds", secs))
+	}
+	return strings.Join(parts, " ")
 }
 
 func selectStatusRateLimitLines(limitsResp *types.GetAccountRateLimitsResponse) []string {

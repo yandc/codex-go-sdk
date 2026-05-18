@@ -1,12 +1,69 @@
 package tests
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
 	"github.com/fanwenlin/codex-go-sdk/codex"
 	"github.com/fanwenlin/codex-go-sdk/types"
 )
+
+type mockRPCExec struct {
+	MockExec
+	calls []rpcCall
+}
+
+type rpcCall struct {
+	method string
+	params interface{}
+}
+
+func (m *mockRPCExec) RPCCall(_ context.Context, method string, params interface{}) (json.RawMessage, error) {
+	m.calls = append(m.calls, rpcCall{method: method, params: params})
+	switch method {
+	case "thread/start":
+		return json.RawMessage(`{"thread":{"id":"thread-goal-1"}}`), nil
+	case "thread/goal/get":
+		return json.RawMessage(`{"goal":{"threadId":"thread-goal-1","objective":"Ship goal support","status":"active","tokenBudget":1000,"tokensUsed":25,"timeUsedSeconds":90,"createdAt":1,"updatedAt":2}}`), nil
+	case "thread/goal/set":
+		return json.RawMessage(`{"goal":{"threadId":"thread-goal-1","objective":"Ship goal support","status":"active","tokenBudget":null,"tokensUsed":0,"timeUsedSeconds":0,"createdAt":1,"updatedAt":2}}`), nil
+	case "thread/goal/clear":
+		return json.RawMessage(`{"cleared":true}`), nil
+	default:
+		return json.RawMessage(`{}`), nil
+	}
+}
+
+type mockShellExec struct {
+	MockExec
+	commands []string
+}
+
+func (m *mockShellExec) RunShellCommand(_ codex.CodexExecArgs, command string) <-chan codex.ExecResult {
+	m.commands = append(m.commands, command)
+	ch := make(chan codex.ExecResult, 3)
+	ch <- codex.ExecResult{Line: `{"type":"turn.started"}`}
+	ch <- codex.ExecResult{Line: `{"type":"turn.completed","usage":{"inputTokens":0,"cachedInputTokens":0,"outputTokens":0}}`}
+	close(ch)
+	return ch
+}
+
+type mockGoalSetExec struct {
+	MockExec
+	params []types.ThreadGoalSetParams
+}
+
+func (m *mockGoalSetExec) RunGoalSet(_ codex.CodexExecArgs, params types.ThreadGoalSetParams) <-chan codex.ExecResult {
+	m.params = append(m.params, params)
+	ch := make(chan codex.ExecResult, 5)
+	ch <- codex.ExecResult{Line: `{"type":"thread.goal.updated","threadId":"thread-goal-1","goal":{"threadId":"thread-goal-1","objective":"Ship goal support","status":"active","createdAt":1,"updatedAt":2}}`}
+	ch <- codex.ExecResult{Line: `{"type":"turn.started","threadId":"thread-goal-1","turnId":"turn-goal-1"}`}
+	ch <- codex.ExecResult{Line: `{"type":"item.completed","item":{"id":"msg-goal-1","type":"agentMessage","text":"working"},"threadId":"thread-goal-1","turnId":"turn-goal-1"}`}
+	ch <- codex.ExecResult{Line: `{"type":"turn.completed","threadId":"thread-goal-1","turnId":"turn-goal-1","usage":{"inputTokens":0,"cachedInputTokens":0,"outputTokens":0}}`}
+	close(ch)
+	return ch
+}
 
 type closeTestExec struct {
 	closed bool
@@ -402,6 +459,197 @@ func TestParseThreadEvent_TurnDiffUpdated(t *testing.T) {
 	}
 }
 
+func TestSupportedSlashCommandsIncludesGoal(t *testing.T) {
+	commands := codex.SupportedSlashCommands()
+	for _, command := range commands {
+		if command.Name == "goal" {
+			if command.ArgumentHint == "" {
+				t.Fatal("expected goal command to expose an argument hint")
+			}
+			return
+		}
+	}
+	t.Fatal("expected /goal to be listed as a supported slash command")
+}
+
+func TestGoalSlashCommandGetsCurrentGoal(t *testing.T) {
+	exec := &mockRPCExec{}
+	client := codex.NewCodexWithExec(exec, types.CodexOptions{})
+	thread := client.StartThread(types.ThreadOptions{})
+
+	turn, err := thread.Run("/goal", types.TurnOptions{})
+	if err != nil {
+		t.Fatalf("run /goal failed: %v", err)
+	}
+	if turn.FinalResponse == "" {
+		t.Fatal("expected a synthetic goal summary")
+	}
+	if len(exec.calls) != 2 {
+		t.Fatalf("expected thread/start and thread/goal/get calls, got %d", len(exec.calls))
+	}
+	if exec.calls[0].method != "thread/start" || exec.calls[1].method != "thread/goal/get" {
+		t.Fatalf("unexpected calls: %#v", exec.calls)
+	}
+	params, ok := exec.calls[1].params.(types.ThreadGoalGetParams)
+	if !ok {
+		t.Fatalf("expected ThreadGoalGetParams, got %T", exec.calls[1].params)
+	}
+	if params.ThreadID != "thread-goal-1" {
+		t.Fatalf("expected thread id %q, got %q", "thread-goal-1", params.ThreadID)
+	}
+}
+
+func TestGoalSlashCommandSetsObjective(t *testing.T) {
+	exec := &mockRPCExec{}
+	client := codex.NewCodexWithExec(exec, types.CodexOptions{})
+	thread := client.ResumeThread("thread-goal-1", types.ThreadOptions{})
+
+	if _, err := thread.Run("/goal Ship goal support", types.TurnOptions{}); err != nil {
+		t.Fatalf("run /goal objective failed: %v", err)
+	}
+	if len(exec.calls) != 1 {
+		t.Fatalf("expected one goal set call, got %d", len(exec.calls))
+	}
+	if exec.calls[0].method != "thread/goal/set" {
+		t.Fatalf("expected thread/goal/set, got %q", exec.calls[0].method)
+	}
+	params, ok := exec.calls[0].params.(types.ThreadGoalSetParams)
+	if !ok {
+		t.Fatalf("expected ThreadGoalSetParams, got %T", exec.calls[0].params)
+	}
+	if params.Objective == nil || *params.Objective != "Ship goal support" {
+		t.Fatalf("unexpected objective: %#v", params.Objective)
+	}
+	if params.Status == nil || *params.Status != types.ThreadGoalStatusActive {
+		t.Fatalf("unexpected status: %#v", params.Status)
+	}
+}
+
+func TestGoalSlashCommandStreamsContinuationWithGoalRunner(t *testing.T) {
+	cases := []struct {
+		name          string
+		input         string
+		wantObjective *string
+		wantStatus    types.ThreadGoalStatus
+	}{
+		{
+			name:          "objective",
+			input:         "/goal Ship goal support",
+			wantObjective: ptrString("Ship goal support"),
+			wantStatus:    types.ThreadGoalStatusActive,
+		},
+		{
+			name:       "resume",
+			input:      "/goal resume",
+			wantStatus: types.ThreadGoalStatusActive,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			exec := &mockGoalSetExec{}
+			client := codex.NewCodexWithExec(exec, types.CodexOptions{})
+			thread := client.ResumeThread("thread-goal-1", types.ThreadOptions{})
+
+			turn, err := thread.Run(tc.input, types.TurnOptions{})
+			if err != nil {
+				t.Fatalf("run %s failed: %v", tc.input, err)
+			}
+			if len(exec.params) != 1 {
+				t.Fatalf("expected one goal set call, got %d", len(exec.params))
+			}
+			params := exec.params[0]
+			if params.ThreadID != "" {
+				t.Fatalf("expected runner to fill thread id, got %q", params.ThreadID)
+			}
+			if tc.wantObjective == nil {
+				if params.Objective != nil {
+					t.Fatalf("unexpected objective: %#v", params.Objective)
+				}
+			} else if params.Objective == nil || *params.Objective != *tc.wantObjective {
+				t.Fatalf("unexpected objective: %#v", params.Objective)
+			}
+			if params.Status == nil || *params.Status != tc.wantStatus {
+				t.Fatalf("unexpected status: %#v", params.Status)
+			}
+			if turn.FinalResponse != "working" {
+				t.Fatalf("expected streamed continuation response, got %q", turn.FinalResponse)
+			}
+		})
+	}
+}
+
+func TestGoalSlashCommandControlCommands(t *testing.T) {
+	cases := []struct {
+		input      string
+		wantMethod string
+		wantStatus *types.ThreadGoalStatus
+	}{
+		{input: "/goal pause", wantMethod: "thread/goal/set", wantStatus: ptrGoalStatus(types.ThreadGoalStatusPaused)},
+		{input: "/goal resume", wantMethod: "thread/goal/set", wantStatus: ptrGoalStatus(types.ThreadGoalStatusActive)},
+		{input: "/goal clear", wantMethod: "thread/goal/clear"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.input, func(t *testing.T) {
+			exec := &mockRPCExec{}
+			client := codex.NewCodexWithExec(exec, types.CodexOptions{})
+			thread := client.ResumeThread("thread-goal-1", types.ThreadOptions{})
+			if _, err := thread.Run(tc.input, types.TurnOptions{}); err != nil {
+				t.Fatalf("run %s failed: %v", tc.input, err)
+			}
+			if len(exec.calls) != 1 {
+				t.Fatalf("expected one call, got %d", len(exec.calls))
+			}
+			if exec.calls[0].method != tc.wantMethod {
+				t.Fatalf("expected %q, got %q", tc.wantMethod, exec.calls[0].method)
+			}
+			if tc.wantStatus != nil {
+				params, ok := exec.calls[0].params.(types.ThreadGoalSetParams)
+				if !ok {
+					t.Fatalf("expected ThreadGoalSetParams, got %T", exec.calls[0].params)
+				}
+				if params.Status == nil || *params.Status != *tc.wantStatus {
+					t.Fatalf("unexpected status: %#v", params.Status)
+				}
+			}
+		})
+	}
+}
+
+func ptrGoalStatus(status types.ThreadGoalStatus) *types.ThreadGoalStatus {
+	return &status
+}
+
+func ptrString(value string) *string {
+	return &value
+}
+
+func TestSupportedSlashCommandsIncludesShellOnly(t *testing.T) {
+	commands := codex.SupportedSlashCommands()
+	found := map[string]bool{}
+	for _, command := range commands {
+		found[command.Name] = true
+	}
+	if !found["shell"] {
+		t.Fatal("expected /shell to be listed as a supported slash command")
+	}
+	if found["exec"] {
+		t.Fatal("expected /exec to be removed from supported slash commands")
+	}
+}
+
+func TestShellSlashCommandUsesShellRunner(t *testing.T) {
+	exec := &mockShellExec{}
+	client := codex.NewCodexWithExec(exec, types.CodexOptions{})
+	thread := client.StartThread(types.ThreadOptions{})
+
+	if _, err := thread.Run("/shell echo ok", types.TurnOptions{}); err != nil {
+		t.Fatalf("run /shell failed: %v", err)
+	}
+	if len(exec.commands) != 1 || exec.commands[0] != "echo ok" {
+		t.Fatalf("unexpected shell commands: %#v", exec.commands)
+	}
+}
+
 func TestItemStartedEvent_CommandExecutionSchema(t *testing.T) {
 	payload := []byte(`{
 		"type": "item.started",
@@ -410,6 +658,7 @@ func TestItemStartedEvent_CommandExecutionSchema(t *testing.T) {
 			"id": "cmd-1",
 			"command": "ls",
 			"aggregatedOutput": "ok",
+			"source": "userShell",
 			"status": "inProgress"
 		}
 	}`)
@@ -427,6 +676,9 @@ func TestItemStartedEvent_CommandExecutionSchema(t *testing.T) {
 	}
 	if string(item.Status) != "inProgress" {
 		t.Fatalf("expected status %q, got %q", "inProgress", item.Status)
+	}
+	if item.Source != "userShell" {
+		t.Fatalf("expected source %q, got %q", "userShell", item.Source)
 	}
 }
 

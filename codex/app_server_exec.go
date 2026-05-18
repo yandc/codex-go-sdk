@@ -433,6 +433,9 @@ func (a *AppServerExec) initialize(ctx context.Context) error {
 			"name":    a.clientInfo.Name,
 			"version": a.clientInfo.Version,
 		},
+		"capabilities": map[string]interface{}{
+			"experimentalApi": true,
+		},
 	}
 	_, initErr := a.call(ctx, "initialize", params)
 	if initErr != nil {
@@ -492,6 +495,37 @@ func (a *AppServerExec) RunReview(
 	return output
 }
 
+// RunShellCommand executes thread/shellCommand and streams the resulting thread events.
+func (a *AppServerExec) RunShellCommand(args CodexExecArgs, command string) <-chan ExecResult {
+	output := make(chan ExecResult)
+
+	go func() {
+		defer close(output)
+		if err := a.runShellCommand(args, command, output); err != nil {
+			output <- ExecResult{Error: err}
+		}
+	}()
+
+	return output
+}
+
+// RunGoalSet updates the thread goal and streams any goal continuation turn events.
+func (a *AppServerExec) RunGoalSet(
+	args CodexExecArgs,
+	params types.ThreadGoalSetParams,
+) <-chan ExecResult {
+	output := make(chan ExecResult)
+
+	go func() {
+		defer close(output)
+		if err := a.runGoalSet(args, params, output); err != nil {
+			output <- ExecResult{Error: err}
+		}
+	}()
+
+	return output
+}
+
 func (a *AppServerExec) runTurn(args CodexExecArgs, output chan ExecResult) error {
 	startErr := a.ensureStarted()
 	if startErr != nil {
@@ -530,6 +564,233 @@ func (a *AppServerExec) runTurn(args CodexExecArgs, output chan ExecResult) erro
 	}
 
 	return a.streamTurn(ctx, threadID, turnID, args, output)
+}
+
+func (a *AppServerExec) runShellCommand(
+	args CodexExecArgs,
+	command string,
+	output chan ExecResult,
+) error {
+	startErr := a.ensureStarted()
+	if startErr != nil {
+		return startErr
+	}
+
+	ctx := args.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	threadID, isNewThread, err := a.ensureThread(ctx, args)
+	if err != nil {
+		return err
+	}
+
+	if isNewThread {
+		threadStarted := map[string]interface{}{
+			"type":     "thread.started",
+			"threadId": threadID,
+		}
+		line, marshalErr := json.Marshal(threadStarted)
+		if marshalErr == nil {
+			output <- ExecResult{Line: string(line)}
+		}
+	}
+
+	sub := a.subscribe()
+	defer a.unsubscribe(sub)
+
+	_, err = a.call(ctx, "thread/shellCommand", types.ThreadShellCommandParams{
+		ThreadID: threadID,
+		Command:  command,
+	})
+	if err != nil {
+		return err
+	}
+
+	state := &turnState{
+		items: make(map[string]map[string]interface{}),
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case event, ok := <-sub:
+			if !ok {
+				return nil
+			}
+			done, err := a.handleTurnEvent(ctx, event, threadID, "", args, state, output)
+			if err != nil {
+				return err
+			}
+			if done {
+				return nil
+			}
+		}
+	}
+}
+
+func (a *AppServerExec) runGoalSet(
+	args CodexExecArgs,
+	params types.ThreadGoalSetParams,
+	output chan ExecResult,
+) error {
+	startErr := a.ensureStarted()
+	if startErr != nil {
+		return startErr
+	}
+
+	ctx := args.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	threadID, isNewThread, err := a.ensureThread(ctx, args)
+	if err != nil {
+		return err
+	}
+	params.ThreadID = threadID
+
+	if isNewThread {
+		threadStarted := map[string]interface{}{
+			"type":     "thread.started",
+			"threadId": threadID,
+		}
+		line, marshalErr := json.Marshal(threadStarted)
+		if marshalErr == nil {
+			output <- ExecResult{Line: string(line)}
+		}
+	}
+
+	sub := a.subscribe()
+	defer a.unsubscribe(sub)
+
+	result, err := a.call(ctx, "thread/goal/set", params)
+	if err != nil {
+		return err
+	}
+
+	var response types.ThreadGoalSetResponse
+	var goal *types.ThreadGoal
+	if len(result) > 0 {
+		if unmarshalErr := json.Unmarshal(result, &response); unmarshalErr != nil {
+			return unmarshalErr
+		}
+		goal = &response.Goal
+	}
+
+	return a.streamGoalContinuation(ctx, threadID, args, goal, sub, output)
+}
+
+func (a *AppServerExec) streamGoalContinuation(
+	ctx context.Context,
+	threadID string,
+	args CodexExecArgs,
+	goal *types.ThreadGoal,
+	sub chan appEvent,
+	output chan ExecResult,
+) error {
+	state := &turnState{
+		items: make(map[string]map[string]interface{}),
+	}
+	startTimer := time.NewTimer(defaultGoalContinuationStartTimeout)
+	defer startTimer.Stop()
+
+	sawTurn := false
+	interruptCh := ctx.Done()
+	interruptPending := false
+	turnID := ""
+
+	for {
+		select {
+		case <-startTimer.C:
+			if !sawTurn {
+				return emitSyntheticGoalMessage(output, goal)
+			}
+		case <-interruptCh:
+			interruptCh = nil
+			if turnID == "" {
+				return ctx.Err()
+			}
+			interruptCtx, cancel := context.WithTimeout(context.Background(), defaultInterruptTimeout)
+			err := a.interruptTurn(interruptCtx, threadID, turnID)
+			cancel()
+			if err != nil {
+				return err
+			}
+			interruptPending = true
+		case event, ok := <-sub:
+			if !ok {
+				return finishStreamTurn(interruptPending, ctx.Err())
+			}
+			if isTurnStartedEvent(event.Method) {
+				if id := eventTurnID(event); id != "" {
+					turnID = id
+				}
+				sawTurn = true
+				stopTimer(startTimer)
+			}
+			done, err := a.handleTurnEvent(ctx, event, threadID, turnID, args, state, output)
+			if err != nil {
+				return err
+			}
+			if done {
+				return finishStreamTurn(interruptPending, ctx.Err())
+			}
+		}
+	}
+}
+
+func emitSyntheticGoalMessage(output chan ExecResult, goal *types.ThreadGoal) error {
+	itemID := fmt.Sprintf("msg-synth-%d", atomic.AddUint64(&syntheticTurnCounter, 1))
+	message := formatGoalUpdatedMessage(goal)
+	lines := []map[string]interface{}{
+		{"type": "turn.started"},
+		{"type": "item.started", "item": map[string]interface{}{"id": itemID, "type": "agentMessage", "text": ""}},
+		{"type": "item.updated", "item": map[string]interface{}{"id": itemID, "type": "agentMessage", "text": message}},
+		{"type": "item.completed", "item": map[string]interface{}{"id": itemID, "type": "agentMessage", "text": message}},
+		{"type": "turn.completed", "usage": map[string]interface{}{"inputTokens": 0, "cachedInputTokens": 0, "outputTokens": 0}},
+	}
+	for _, payload := range lines {
+		line, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		output <- ExecResult{Line: string(line)}
+	}
+	return nil
+}
+
+func isTurnStartedEvent(method string) bool {
+	return method == "turn/started"
+}
+
+func eventTurnID(event appEvent) string {
+	var meta struct {
+		TurnID string `json:"turnId"`
+		Turn   *struct {
+			ID string `json:"id"`
+		} `json:"turn"`
+	}
+	if err := json.Unmarshal(event.Params, &meta); err != nil {
+		return ""
+	}
+	if meta.TurnID != "" {
+		return meta.TurnID
+	}
+	if meta.Turn != nil {
+		return meta.Turn.ID
+	}
+	return ""
+}
+
+func stopTimer(timer *time.Timer) {
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
 }
 
 func (a *AppServerExec) runReview(
@@ -700,9 +961,10 @@ func isApprovalRequestedEvent(method string) bool {
 var codexSDKVersion string
 
 const (
-	appServerSubscriberBuffer = 256
-	defaultInitTimeout        = 10 * time.Second
-	defaultInterruptTimeout   = 5 * time.Second
+	appServerSubscriberBuffer           = 256
+	defaultInitTimeout                  = 10 * time.Second
+	defaultInterruptTimeout             = 5 * time.Second
+	defaultGoalContinuationStartTimeout = 2 * time.Second
 )
 
 func (a *AppServerExec) ensureThread(ctx context.Context, args CodexExecArgs) (string, bool, error) {

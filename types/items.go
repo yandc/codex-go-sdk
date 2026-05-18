@@ -22,6 +22,8 @@ type CommandExecutionItem struct {
 	AggregatedOutput *string `json:"aggregatedOutput,omitempty"`
 	// ExitCode is set when the command exits; omitted while still running
 	ExitCode *int `json:"exitCode,omitempty"`
+	// Source identifies who initiated the command execution.
+	Source string `json:"source,omitempty"`
 	// Status is the current status of the command execution
 	Status CommandExecutionStatus `json:"status"`
 }
@@ -36,6 +38,7 @@ func (i *CommandExecutionItem) UnmarshalJSON(data []byte) error {
 		AggregatedOutputAlt *string                `json:"aggregated_output"`
 		ExitCode            *int                   `json:"exitCode"`
 		ExitCodeAlt         *int                   `json:"exit_code"`
+		Source              string                 `json:"source"`
 		Status              CommandExecutionStatus `json:"status"`
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
@@ -54,6 +57,7 @@ func (i *CommandExecutionItem) UnmarshalJSON(data []byte) error {
 	} else {
 		i.ExitCode = payload.ExitCodeAlt
 	}
+	i.Source = payload.Source
 	i.Status = payload.Status
 	return nil
 }

@@ -215,6 +215,37 @@ type (
 	ReviewStartResponse = types.ReviewStartResponse
 	// SlashCommandInfo describes one supported slash command.
 	SlashCommandInfo = types.SlashCommandInfo
+	// ThreadGoalStatus is the lifecycle status for a Codex thread goal.
+	ThreadGoalStatus = types.ThreadGoalStatus
+	// ThreadGoal describes the active goal persisted for a Codex thread.
+	ThreadGoal = types.ThreadGoal
+	// ThreadGoalSetParams configures thread/goal/set.
+	ThreadGoalSetParams = types.ThreadGoalSetParams
+	// ThreadGoalSetResponse contains the updated goal.
+	ThreadGoalSetResponse = types.ThreadGoalSetResponse
+	// ThreadGoalGetParams configures thread/goal/get.
+	ThreadGoalGetParams = types.ThreadGoalGetParams
+	// ThreadGoalGetResponse contains the current goal, when present.
+	ThreadGoalGetResponse = types.ThreadGoalGetResponse
+	// ThreadGoalClearParams configures thread/goal/clear.
+	ThreadGoalClearParams = types.ThreadGoalClearParams
+	// ThreadGoalClearResponse reports whether a goal was cleared.
+	ThreadGoalClearResponse = types.ThreadGoalClearResponse
+	// ThreadGoalUpdatedEvent is emitted when the thread goal changes.
+	ThreadGoalUpdatedEvent = types.ThreadGoalUpdatedEvent
+	// ThreadGoalClearedEvent is emitted when the thread goal is cleared.
+	ThreadGoalClearedEvent = types.ThreadGoalClearedEvent
+	// ThreadShellCommandParams configures thread/shellCommand.
+	ThreadShellCommandParams = types.ThreadShellCommandParams
+	// ThreadShellCommandResponse is the empty success response for thread/shellCommand.
+	ThreadShellCommandResponse = types.ThreadShellCommandResponse
+)
+
+const (
+	ThreadGoalStatusActive        = types.ThreadGoalStatusActive
+	ThreadGoalStatusPaused        = types.ThreadGoalStatusPaused
+	ThreadGoalStatusBudgetLimited = types.ThreadGoalStatusBudgetLimited
+	ThreadGoalStatusComplete      = types.ThreadGoalStatusComplete
 )
 
 // Re-export alias types.

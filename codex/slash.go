@@ -25,6 +25,16 @@ var supportedSlashCommands = []types.SlashCommandInfo{
 		Description: "Compact the current thread context.",
 	},
 	{
+		Name:         "shell",
+		Description:  "Run a shell command in the current thread.",
+		ArgumentHint: "<command>",
+	},
+	{
+		Name:         "goal",
+		Description:  "Show, set, pause, resume, or clear the active thread goal.",
+		ArgumentHint: "[objective|pause|resume|clear]",
+	},
+	{
 		Name:         "review",
 		Description:  "Review current changes or run a custom review.",
 		ArgumentHint: "[instructions]",
