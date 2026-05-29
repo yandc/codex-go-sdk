@@ -664,12 +664,14 @@ func (t *Thread) ensureAppServerThread(ctx context.Context) (string, error) {
 		return *t.id, nil
 	}
 
-	params := buildThreadStartParams(
-		strings.TrimSpace(t.threadOptions.Model),
-		strings.TrimSpace(t.threadOptions.ModelProvider),
-		t.threadOptions.FastService,
-		strings.TrimSpace(t.threadOptions.WorkingDirectory),
-	)
+	params := buildThreadStartParams(CodexExecArgs{
+		Model:            strings.TrimSpace(t.threadOptions.Model),
+		ModelProvider:    strings.TrimSpace(t.threadOptions.ModelProvider),
+		FastService:      t.threadOptions.FastService,
+		WorkingDirectory: strings.TrimSpace(t.threadOptions.WorkingDirectory),
+		SandboxMode:      string(t.threadOptions.SandboxMode),
+		ApprovalPolicy:   string(t.threadOptions.ApprovalPolicy),
+	})
 
 	var response struct {
 		Thread struct {

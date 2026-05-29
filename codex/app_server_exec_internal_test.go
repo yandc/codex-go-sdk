@@ -1,0 +1,287 @@
+package codex
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
+	"testing"
+	"time"
+
+	"github.com/fanwenlin/codex-go-sdk/types"
+)
+
+type captureWriteCloser struct {
+	bytes.Buffer
+}
+
+func (c *captureWriteCloser) Close() error {
+	return nil
+}
+
+func TestBuildThreadStartParamsIncludesPermissions(t *testing.T) {
+	params := buildThreadStartParams(CodexExecArgs{
+		Model:            "test-model",
+		ModelProvider:    "openai",
+		SandboxMode:      string(types.SandboxModeFullAccess),
+		ApprovalPolicy:   string(types.ApprovalModeNever),
+		WorkingDirectory: "/tmp/project",
+		FastService:      "on",
+	})
+
+	assertParam(t, params, "model", "test-model")
+	assertParam(t, params, "modelProvider", "openai")
+	assertParam(t, params, "sandbox", "danger-full-access")
+	assertParam(t, params, "approvalPolicy", "never")
+	assertParam(t, params, "cwd", "/tmp/project")
+	assertParam(t, params, "serviceTier", "fast")
+}
+
+func TestBuildThreadResumeParamsIncludesPermissions(t *testing.T) {
+	params := buildThreadResumeParams("thread-1", CodexExecArgs{
+		Model:            "test-model",
+		SandboxMode:      string(types.SandboxModeWorkspaceWrite),
+		ApprovalPolicy:   string(types.ApprovalModeOnRequest),
+		WorkingDirectory: "/tmp/project",
+	}, "openai")
+
+	assertParam(t, params, "threadId", "thread-1")
+	assertParam(t, params, "model", "test-model")
+	assertParam(t, params, "modelProvider", "openai")
+	assertParam(t, params, "sandbox", "workspace-write")
+	assertParam(t, params, "approvalPolicy", "on-request")
+	assertParam(t, params, "cwd", "/tmp/project")
+}
+
+func TestHandleLineDispatchesServerRequestWithID(t *testing.T) {
+	exec := NewAppServerExec("", nil, nil, types.ClientInfo{}, "", "")
+	sub := exec.subscribe()
+	defer exec.unsubscribe(sub)
+
+	exec.handleLine(`{"id":7,"method":"item/commandExecution/requestApproval","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"item-1"}}`)
+
+	event := <-sub
+	if event.ID == nil || *event.ID != 7 {
+		t.Fatalf("expected server request id 7, got %v", event.ID)
+	}
+	if event.Method != "item/commandExecution/requestApproval" {
+		t.Fatalf("unexpected method %q", event.Method)
+	}
+}
+
+func TestSubmitApprovalRespondsToCommandExecutionRequest(t *testing.T) {
+	stdin := &captureWriteCloser{}
+	exec := &AppServerExec{stdin: stdin}
+	requestID := int64(7)
+	event := appEvent{
+		ID:     &requestID,
+		Method: "item/commandExecution/requestApproval",
+		Params: json.RawMessage(`{"threadId":"thread-1","turnId":"turn-1","itemId":"item-1"}`),
+	}
+
+	called := false
+	exec.submitApproval(context.Background(), event, func(req types.ApprovalRequest) (types.ApprovalDecision, error) {
+		called = true
+		if req.ItemID != "item-1" {
+			t.Fatalf("unexpected item id %q", req.ItemID)
+		}
+		if req.ItemType != "commandExecution" {
+			t.Fatalf("unexpected item type %q", req.ItemType)
+		}
+		return types.ApprovalDecisionApproved, nil
+	})
+
+	if !called {
+		t.Fatal("approval handler was not called")
+	}
+	var response struct {
+		ID     int64 `json:"id"`
+		Result struct {
+			Decision string `json:"decision"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(stdin.Bytes()), &response); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if response.ID != 7 {
+		t.Fatalf("unexpected response id %d", response.ID)
+	}
+	if response.Result.Decision != "accept" {
+		t.Fatalf("unexpected decision %q", response.Result.Decision)
+	}
+}
+
+func TestSubmitApprovalRespondsToFileChangeRequest(t *testing.T) {
+	stdin := &captureWriteCloser{}
+	exec := &AppServerExec{stdin: stdin}
+	requestID := int64(9)
+	event := appEvent{
+		ID:     &requestID,
+		Method: "item/fileChange/requestApproval",
+		Params: json.RawMessage(`{"threadId":"thread-1","turnId":"turn-1","itemId":"item-2"}`),
+	}
+
+	exec.submitApproval(context.Background(), event, func(req types.ApprovalRequest) (types.ApprovalDecision, error) {
+		if req.ItemType != "fileChange" {
+			t.Fatalf("unexpected item type %q", req.ItemType)
+		}
+		return types.ApprovalDecisionRejected, nil
+	})
+
+	var response struct {
+		ID     int64 `json:"id"`
+		Result struct {
+			Decision string `json:"decision"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(stdin.Bytes()), &response); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if response.ID != 9 {
+		t.Fatalf("unexpected response id %d", response.ID)
+	}
+	if response.Result.Decision != "decline" {
+		t.Fatalf("unexpected decision %q", response.Result.Decision)
+	}
+}
+
+func TestGoalContinuationIgnoresOtherThreadTurnBeforeOwnTurn(t *testing.T) {
+	exec := NewAppServerExec("", nil, nil, types.ClientInfo{}, "", "")
+	sub := make(chan appEvent, 8)
+	output := make(chan ExecResult, 8)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- exec.streamGoalContinuation(ctx, "thread-goal", CodexExecArgs{}, nil, sub, output)
+	}()
+
+	sub <- appEvent{
+		Method: "turn/started",
+		Params: json.RawMessage(`{"threadId":"thread-other","turn":{"id":"turn-other"}}`),
+	}
+	sub <- appEvent{
+		Method: "item/completed",
+		Params: json.RawMessage(`{"threadId":"thread-other","turnId":"turn-other","item":{"id":"msg-other","type":"agentMessage","text":"wrong stream"}}`),
+	}
+	sub <- appEvent{
+		Method: "turn/started",
+		Params: json.RawMessage(`{"threadId":"thread-goal","turn":{"id":"turn-goal"}}`),
+	}
+	sub <- appEvent{
+		Method: "item/completed",
+		Params: json.RawMessage(`{"threadId":"thread-goal","turnId":"turn-goal","item":{"id":"msg-goal","type":"agentMessage","text":"right stream"}}`),
+	}
+	sub <- appEvent{
+		Method: "turn/completed",
+		Params: json.RawMessage(`{"threadId":"thread-goal","turnId":"turn-goal","usage":{"inputTokens":1,"cachedInputTokens":0,"outputTokens":1}}`),
+	}
+
+	if err := <-errCh; err != nil {
+		t.Fatalf("streamGoalContinuation returned error: %v", err)
+	}
+	close(output)
+
+	var lines []string
+	for result := range output {
+		if result.Error != nil {
+			t.Fatalf("unexpected output error: %v", result.Error)
+		}
+		lines = append(lines, result.Line)
+	}
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 goal-thread lines, got %d: %v", len(lines), lines)
+	}
+	for _, line := range lines {
+		if bytes.Contains([]byte(line), []byte("thread-other")) || bytes.Contains([]byte(line), []byte("wrong stream")) {
+			t.Fatalf("cross-thread event leaked into goal stream: %s", line)
+		}
+	}
+}
+
+func TestEventMatchesTurnRejectsMismatchedThread(t *testing.T) {
+	event := appEvent{
+		Method: "item/completed",
+		Params: json.RawMessage(`{"threadId":"thread-other","turnId":"turn-1","item":{"id":"msg-1","type":"agentMessage","text":"wrong"}}`),
+	}
+
+	if eventMatchesTurn(event, "thread-1", "turn-1") {
+		t.Fatal("event with mismatched threadId and matching turnId should not match")
+	}
+}
+
+func TestStreamTurnIgnoresOtherThreadEvents(t *testing.T) {
+	exec := NewAppServerExec("", nil, nil, types.ClientInfo{}, "", "")
+	output := make(chan ExecResult, 8)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- exec.streamTurn(ctx, "thread-1", "turn-1", CodexExecArgs{}, output)
+	}()
+	waitForSubscribers(t, exec, 1)
+
+	exec.dispatchEvent(appEvent{
+		Method: "item/completed",
+		Params: json.RawMessage(`{"threadId":"thread-other","turnId":"turn-other","item":{"id":"msg-other","type":"agentMessage","text":"wrong stream"}}`),
+	})
+	exec.dispatchEvent(appEvent{
+		Method: "item/completed",
+		Params: json.RawMessage(`{"threadId":"thread-1","turnId":"turn-1","item":{"id":"msg-1","type":"agentMessage","text":"right stream"}}`),
+	})
+	exec.dispatchEvent(appEvent{
+		Method: "turn/completed",
+		Params: json.RawMessage(`{"threadId":"thread-1","turnId":"turn-1","usage":{"inputTokens":1,"cachedInputTokens":0,"outputTokens":1}}`),
+	})
+
+	if err := <-errCh; err != nil {
+		t.Fatalf("streamTurn returned error: %v", err)
+	}
+	close(output)
+
+	var lines []string
+	for result := range output {
+		if result.Error != nil {
+			t.Fatalf("unexpected output error: %v", result.Error)
+		}
+		lines = append(lines, result.Line)
+	}
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 own-thread lines, got %d: %v", len(lines), lines)
+	}
+	for _, line := range lines {
+		if bytes.Contains([]byte(line), []byte("thread-other")) || bytes.Contains([]byte(line), []byte("wrong stream")) {
+			t.Fatalf("cross-thread event leaked into normal stream: %s", line)
+		}
+	}
+}
+
+func assertParam(t *testing.T, params map[string]interface{}, key string, want interface{}) {
+	t.Helper()
+	got, ok := params[key]
+	if !ok {
+		t.Fatalf("missing param %q", key)
+	}
+	if got != want {
+		t.Fatalf("param %q: got %v, want %v", key, got, want)
+	}
+}
+
+var _ io.WriteCloser = (*captureWriteCloser)(nil)
+
+func waitForSubscribers(t *testing.T, exec *AppServerExec, want int) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		exec.subsMu.RLock()
+		got := len(exec.subs)
+		exec.subsMu.RUnlock()
+		if got >= want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %d subscribers", want)
+}

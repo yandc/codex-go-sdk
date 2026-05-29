@@ -33,6 +33,7 @@ type rpcEnvelope struct {
 }
 
 type appEvent struct {
+	ID     *int64
 	Method string
 	Params json.RawMessage
 }
@@ -242,6 +243,10 @@ func (a *AppServerExec) handleLine(line string) {
 		a.logf("app server: failed to parse line: %v", unmarshalErr)
 		return
 	}
+	if envelope.Method != "" {
+		a.dispatchEvent(appEvent{ID: envelope.ID, Method: envelope.Method, Params: envelope.Params})
+		return
+	}
 	if envelope.ID != nil {
 		a.pendingMu.Lock()
 		ch := a.pending[*envelope.ID]
@@ -250,9 +255,6 @@ func (a *AppServerExec) handleLine(line string) {
 			ch <- envelope
 		}
 		return
-	}
-	if envelope.Method != "" {
-		a.dispatchEvent(appEvent{Method: envelope.Method, Params: envelope.Params})
 	}
 }
 
@@ -357,6 +359,24 @@ func (a *AppServerExec) sendRequest(id int64, method string, params interface{})
 		return writeErr
 	}
 	return nil
+}
+
+func (a *AppServerExec) sendResponse(id int64, result interface{}) error {
+	if a.closed.Load() {
+		return errors.New("app server exec is closed")
+	}
+	payload := map[string]interface{}{
+		"id":     id,
+		"result": result,
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	a.writeMu.Lock()
+	defer a.writeMu.Unlock()
+	_, writeErr := a.stdin.Write(append(data, '\n'))
+	return writeErr
 }
 
 // Close terminates the long-lived app-server process and releases resources.
@@ -836,7 +856,7 @@ func (a *AppServerExec) streamGoalContinuation(
 			if !ok {
 				return finishStreamTurn(interruptPending, ctx.Err())
 			}
-			if isTurnStartedEvent(event.Method) {
+			if isTurnStartedEvent(event.Method) && eventMatchesTurn(event, threadID, "") {
 				if id := eventTurnID(event); id != "" {
 					turnID = id
 				}
@@ -1067,7 +1087,10 @@ func (a *AppServerExec) interruptTurn(ctx context.Context, threadID string, turn
 }
 
 func isApprovalRequestedEvent(method string) bool {
-	return method == "item/commandExecution/approvalRequested" || method == "item/fileChange/approvalRequested"
+	return method == "item/commandExecution/requestApproval" ||
+		method == "item/fileChange/requestApproval" ||
+		method == "item/commandExecution/approvalRequested" ||
+		method == "item/fileChange/approvalRequested"
 }
 
 //go:embed current_version
@@ -1083,7 +1106,7 @@ const (
 func (a *AppServerExec) ensureThread(ctx context.Context, args CodexExecArgs) (string, bool, error) {
 	requested := args.ThreadId
 	if requested == nil || *requested == "" {
-		params := buildThreadStartParams(args.Model, args.ModelProvider, args.FastService, args.WorkingDirectory)
+		params := buildThreadStartParams(args)
 		result, err := a.call(ctx, "thread/start", params)
 		if err != nil {
 			return "", false, err
@@ -1118,23 +1141,9 @@ func (a *AppServerExec) ensureThread(ctx context.Context, args CodexExecArgs) (s
 	return threadID, false, nil
 }
 
-func buildThreadStartParams(model string, modelProvider string, fastService string, workingDirectory string) map[string]interface{} {
+func buildThreadStartParams(args CodexExecArgs) map[string]interface{} {
 	params := map[string]interface{}{}
-	if model != "" {
-		params["model"] = model
-	}
-	if modelProvider != "" {
-		params["modelProvider"] = modelProvider
-	}
-	switch normalizeFastService(fastService) {
-	case "on":
-		params["serviceTier"] = "fast"
-	case "off":
-		params["serviceTier"] = nil
-	}
-	if workingDirectory != "" {
-		params["cwd"] = workingDirectory
-	}
+	appendThreadContextParams(params, args, args.ModelProvider)
 	return params
 }
 
@@ -1147,29 +1156,39 @@ func (a *AppServerExec) buildThreadResumeParams(ctx context.Context, threadID st
 			return nil, err
 		}
 	}
-	return buildThreadResumeParams(threadID, args.Model, modelProvider, args.FastService, args.WorkingDirectory), nil
+	return buildThreadResumeParams(threadID, args, modelProvider), nil
 }
 
-func buildThreadResumeParams(threadID string, model string, modelProvider string, fastService string, workingDirectory string) map[string]interface{} {
+func buildThreadResumeParams(threadID string, args CodexExecArgs, modelProvider string) map[string]interface{} {
 	params := map[string]interface{}{
 		"threadId": threadID,
 	}
-	if model != "" {
-		params["model"] = model
+	appendThreadContextParams(params, args, modelProvider)
+	return params
+}
+
+func appendThreadContextParams(params map[string]interface{}, args CodexExecArgs, modelProvider string) {
+	if args.Model != "" {
+		params["model"] = args.Model
 	}
 	if modelProvider != "" {
 		params["modelProvider"] = modelProvider
 	}
-	switch normalizeFastService(fastService) {
+	switch normalizeFastService(args.FastService) {
 	case "on":
 		params["serviceTier"] = "fast"
 	case "off":
 		params["serviceTier"] = nil
 	}
-	if workingDirectory != "" {
-		params["cwd"] = workingDirectory
+	if args.WorkingDirectory != "" {
+		params["cwd"] = args.WorkingDirectory
 	}
-	return params
+	if args.ApprovalPolicy != "" {
+		params["approvalPolicy"] = args.ApprovalPolicy
+	}
+	if args.SandboxMode != "" {
+		params["sandbox"] = args.SandboxMode
+	}
 }
 
 func (a *AppServerExec) currentModelProvider(ctx context.Context, workingDirectory string) (string, error) {
@@ -1324,7 +1343,10 @@ func eventMatchesTurn(event appEvent, threadID string, turnID string) bool {
 	if meta.TurnID == "" && meta.Turn != nil {
 		meta.TurnID = meta.Turn.ID
 	}
-	if turnID != "" && meta.TurnID != "" {
+	if threadID != "" && meta.ThreadID != "" && meta.ThreadID != threadID {
+		return false
+	}
+	if turnID != "" {
 		return meta.TurnID == turnID
 	}
 	if threadID != "" && meta.ThreadID != "" {
@@ -1336,6 +1358,7 @@ func eventMatchesTurn(event appEvent, threadID string, turnID string) bool {
 func (a *AppServerExec) submitApproval(ctx context.Context, event appEvent, handler types.ApprovalHandler) {
 	var params struct {
 		ThreadID string `json:"threadId"`
+		TurnID   string `json:"turnId"`
 		ItemID   string `json:"itemId"`
 		Item     *struct {
 			ID   string `json:"id"`
@@ -1348,12 +1371,14 @@ func (a *AppServerExec) submitApproval(ctx context.Context, event appEvent, hand
 		return
 	}
 	itemID := params.ItemID
-	itemType := ""
+	itemType := approvalItemType(event.Method)
 	if params.Item != nil {
 		if itemID == "" {
 			itemID = params.Item.ID
 		}
-		itemType = params.Item.Type
+		if params.Item.Type != "" {
+			itemType = params.Item.Type
+		}
 	}
 	if itemID == "" {
 		return
@@ -1369,6 +1394,16 @@ func (a *AppServerExec) submitApproval(ctx context.Context, event appEvent, hand
 	if decision == "" {
 		return
 	}
+	if event.ID != nil {
+		result := approvalResponseResult(event.Method, decision)
+		if result == nil {
+			return
+		}
+		if submitErr := a.sendResponse(*event.ID, result); submitErr != nil {
+			a.logf("app server: approval response error: %v", submitErr)
+		}
+		return
+	}
 	payload := map[string]interface{}{
 		"itemId":   itemID,
 		"decision": string(decision),
@@ -1379,6 +1414,41 @@ func (a *AppServerExec) submitApproval(ctx context.Context, event appEvent, hand
 	_, submitErr := a.call(ctx, "approval/submit", payload)
 	if submitErr != nil {
 		a.logf("app server: approval submit error: %v", submitErr)
+	}
+}
+
+func approvalItemType(method string) string {
+	switch method {
+	case "item/commandExecution/requestApproval", "item/commandExecution/approvalRequested":
+		return "commandExecution"
+	case "item/fileChange/requestApproval", "item/fileChange/approvalRequested":
+		return "fileChange"
+	default:
+		return ""
+	}
+}
+
+func approvalResponseResult(method string, decision types.ApprovalDecision) map[string]interface{} {
+	mapped := mapApprovalDecision(decision)
+	if mapped == "" {
+		return nil
+	}
+	switch method {
+	case "item/commandExecution/requestApproval", "item/fileChange/requestApproval":
+		return map[string]interface{}{"decision": mapped}
+	default:
+		return nil
+	}
+}
+
+func mapApprovalDecision(decision types.ApprovalDecision) string {
+	switch decision {
+	case types.ApprovalDecisionApproved:
+		return "accept"
+	case types.ApprovalDecisionRejected:
+		return "decline"
+	default:
+		return string(decision)
 	}
 }
 
