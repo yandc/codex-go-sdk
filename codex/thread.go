@@ -25,6 +25,10 @@ type goalSetExec interface {
 	RunGoalSet(args CodexExecArgs, params types.ThreadGoalSetParams) <-chan ExecResult
 }
 
+type threadEventsExec interface {
+	SubscribeThreadEvents(args CodexExecArgs) <-chan ExecResult
+}
+
 var syntheticTurnCounter uint64
 
 // Thread represents a conversation thread with the agent.
@@ -90,6 +94,47 @@ func (t *Thread) runStreamedInternal(input types.Input, turnOptions types.TurnOp
 
 		resultChan := t.exec.Run(args)
 
+		for result := range resultChan {
+			event, eventErr := t.processExecResult(result)
+			if eventErr != nil {
+				events <- &types.ThreadErrorEvent{
+					Type:    "error",
+					Message: eventErr.Error(),
+				}
+				return
+			}
+			if event == nil {
+				continue
+			}
+			if threadStarted, ok := event.(*types.ThreadStartedEvent); ok {
+				t.id = &threadStarted.ThreadId
+			}
+			select {
+			case events <- event:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	return events, nil
+}
+
+func (t *Thread) subscribeEvents(ctx context.Context) (chan types.ThreadEvent, error) {
+	runner, ok := t.exec.(threadEventsExec)
+	if !ok {
+		return nil, fmt.Errorf("thread event subscription requires app-server transport")
+	}
+	if t.id == nil || strings.TrimSpace(*t.id) == "" {
+		return nil, fmt.Errorf("thread id required")
+	}
+
+	args := t.buildExecArgs(ctx, "", nil, nil, "")
+	events := make(chan types.ThreadEvent)
+
+	go func() {
+		defer close(events)
+		resultChan := runner.SubscribeThreadEvents(args)
 		for result := range resultChan {
 			event, eventErr := t.processExecResult(result)
 			if eventErr != nil {

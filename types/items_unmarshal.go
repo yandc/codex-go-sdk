@@ -95,6 +95,8 @@ func newThreadItem(itemType string) (ThreadItem, bool) {
 		return &CompactedItem{}, true
 	case "collabToolCall":
 		return &CollabToolCallItem{}, true
+	case "collabAgentToolCall":
+		return &CollabToolCallItem{}, true
 	case "collab_tool_call":
 		return &CollabToolCallItem{}, true
 	default:

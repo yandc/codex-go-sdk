@@ -1070,29 +1070,63 @@ func TestItemStartedEvent_CompactedItem(t *testing.T) {
 }
 
 func TestItemStartedEvent_CollabToolCall(t *testing.T) {
-	payload := []byte(`{
-		"type": "item.started",
-		"item": {
-			"type": "collabToolCall",
-			"id": "collab-1",
-			"tool": "tool",
-			"arguments": {"a": 1},
-			"status": "inProgress"
-		}
-	}`)
+	for _, itemType := range []string{"collabToolCall", "collabAgentToolCall"} {
+		t.Run(itemType, func(t *testing.T) {
+			payload := []byte(`{
+			"type": "item.started",
+			"item": {
+				"type": "` + itemType + `",
+				"id": "collab-1",
+				"tool": "tool",
+				"arguments": {"a": 1},
+				"status": "inProgress",
+				"senderThreadId": "sender-thread",
+				"receiverThreadIds": ["receiver-thread"],
+				"prompt": "inspect this",
+				"model": "gpt-test",
+				"reasoningEffort": "high",
+				"agentsStates": {
+					"receiver-thread": {
+						"status": "running",
+						"message": "working"
+					}
+				}
+			}
+		}`)
 
-	var event types.ItemStartedEvent
-	if err := json.Unmarshal(payload, &event); err != nil {
-		t.Fatalf("unmarshal collabToolCall failed: %v", err)
-	}
-	item, ok := event.Item.(*types.CollabToolCallItem)
-	if !ok {
-		t.Fatalf("expected CollabToolCallItem, got %T", event.Item)
-	}
-	if item.Tool != "tool" {
-		t.Fatalf("expected tool %q, got %q", "tool", item.Tool)
-	}
-	if item.Status != "inProgress" {
-		t.Fatalf("expected status %q, got %q", "inProgress", item.Status)
+			var event types.ItemStartedEvent
+			if err := json.Unmarshal(payload, &event); err != nil {
+				t.Fatalf("unmarshal collab tool call failed: %v", err)
+			}
+			item, ok := event.Item.(*types.CollabToolCallItem)
+			if !ok {
+				t.Fatalf("expected CollabToolCallItem, got %T", event.Item)
+			}
+			if item.Tool != "tool" {
+				t.Fatalf("expected tool %q, got %q", "tool", item.Tool)
+			}
+			if item.Status != "inProgress" {
+				t.Fatalf("expected status %q, got %q", "inProgress", item.Status)
+			}
+			if item.SenderThreadID != "sender-thread" {
+				t.Fatalf("expected sender thread id, got %q", item.SenderThreadID)
+			}
+			if len(item.ReceiverThreadIDs) != 1 || item.ReceiverThreadIDs[0] != "receiver-thread" {
+				t.Fatalf("expected receiver thread ids, got %#v", item.ReceiverThreadIDs)
+			}
+			if item.Prompt == nil || *item.Prompt != "inspect this" {
+				t.Fatalf("expected prompt, got %#v", item.Prompt)
+			}
+			if item.Model == nil || *item.Model != "gpt-test" {
+				t.Fatalf("expected model, got %#v", item.Model)
+			}
+			if item.ReasoningEffort == nil || *item.ReasoningEffort != "high" {
+				t.Fatalf("expected reasoning effort, got %#v", item.ReasoningEffort)
+			}
+			state, ok := item.AgentsStates["receiver-thread"]
+			if !ok || state.Status != "running" || state.Message == nil || *state.Message != "working" {
+				t.Fatalf("expected agent state, got %#v", item.AgentsStates)
+			}
+		})
 	}
 }

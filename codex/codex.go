@@ -101,6 +101,15 @@ func (c *Codex) ResumeThread(id string, options types.ThreadOptions) *Thread {
 	return newThread(c.exec, c.options, options, &id)
 }
 
+func (c *Codex) SubscribeThreadEvents(ctx context.Context, threadID string, options types.ThreadOptions) (*types.StreamedTurn, error) {
+	thread := c.ResumeThread(threadID, options)
+	events, err := thread.subscribeEvents(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &types.StreamedTurn{Events: events}, nil
+}
+
 // ListModels queries the app-server model catalog.
 func (c *Codex) ListModels(ctx context.Context, params types.ModelListParams) (*types.ModelListResponse, error) {
 	if exec, ok := c.exec.(modelListExec); ok {

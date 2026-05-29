@@ -526,6 +526,19 @@ func (a *AppServerExec) RunGoalSet(
 	return output
 }
 
+func (a *AppServerExec) SubscribeThreadEvents(args CodexExecArgs) <-chan ExecResult {
+	output := make(chan ExecResult)
+
+	go func() {
+		defer close(output)
+		if err := a.subscribeThreadEvents(args, output); err != nil {
+			output <- ExecResult{Error: err}
+		}
+	}()
+
+	return output
+}
+
 func (a *AppServerExec) runTurn(args CodexExecArgs, output chan ExecResult) error {
 	startErr := a.ensureStarted()
 	if startErr != nil {
@@ -564,6 +577,106 @@ func (a *AppServerExec) runTurn(args CodexExecArgs, output chan ExecResult) erro
 	}
 
 	return a.streamTurn(ctx, threadID, turnID, args, output)
+}
+
+func (a *AppServerExec) subscribeThreadEvents(args CodexExecArgs, output chan ExecResult) error {
+	startErr := a.ensureStarted()
+	if startErr != nil {
+		return startErr
+	}
+
+	ctx := args.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	threadID, _, err := a.ensureThread(ctx, args)
+	if err != nil {
+		return err
+	}
+
+	sub := a.subscribe()
+	defer a.unsubscribe(sub)
+
+	state := &turnState{
+		items: make(map[string]map[string]interface{}),
+	}
+	interruptCh := ctx.Done()
+	cancelRequested := false
+	interruptSent := false
+	turnID := ""
+	var interruptTimer *time.Timer
+	var interruptDeadline <-chan time.Time
+	defer func() {
+		if interruptTimer != nil {
+			stopTimer(interruptTimer)
+		}
+	}()
+	interrupt := func() error {
+		if interruptSent {
+			return nil
+		}
+		if turnID == "" {
+			return ctx.Err()
+		}
+		if interruptTimer != nil {
+			stopTimer(interruptTimer)
+			interruptTimer = nil
+			interruptDeadline = nil
+		}
+		interruptCtx, cancel := context.WithTimeout(context.Background(), defaultInterruptTimeout)
+		err := a.interruptTurn(interruptCtx, threadID, turnID)
+		cancel()
+		if err != nil {
+			return err
+		}
+		interruptSent = true
+		return nil
+	}
+	for {
+		select {
+		case <-interruptCh:
+			interruptCh = nil
+			cancelRequested = true
+			if turnID != "" {
+				if err := interrupt(); err != nil {
+					return err
+				}
+				continue
+			}
+			interruptTimer = time.NewTimer(defaultInterruptTimeout)
+			interruptDeadline = interruptTimer.C
+		case <-interruptDeadline:
+			return ctx.Err()
+		case event, ok := <-sub:
+			if !ok {
+				return finishStreamTurn(interruptSent, ctx.Err())
+			}
+			if !eventMatchesTurn(event, threadID, "") {
+				continue
+			}
+			if turnID == "" {
+				turnID = eventTurnID(event)
+			}
+			if cancelRequested && !interruptSent && turnID != "" {
+				if err := interrupt(); err != nil {
+					return err
+				}
+			}
+			if args.ApprovalHandler != nil && isApprovalRequestedEvent(event.Method) {
+				a.submitApproval(ctx, event, args.ApprovalHandler)
+			}
+			line, done, err := appEventToLegacyLine(event, state)
+			if err != nil {
+				return err
+			}
+			if line != "" {
+				output <- ExecResult{Line: line}
+			}
+			if done {
+				return finishStreamTurn(interruptSent, ctx.Err())
+			}
+		}
+	}
 }
 
 func (a *AppServerExec) runShellCommand(

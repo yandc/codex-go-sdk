@@ -326,16 +326,27 @@ func (i CompactedItem) GetType() string {
 
 // CollabToolCallItem represents a collaborative tool call.
 type CollabToolCallItem struct {
-	ID        string            `json:"id"`
-	Type      string            `json:"type"`
-	Tool      string            `json:"tool,omitempty"`
-	Arguments interface{}       `json:"arguments,omitempty"`
-	Result    interface{}       `json:"result,omitempty"`
-	Error     *McpToolCallError `json:"error,omitempty"`
-	Status    string            `json:"status,omitempty"`
+	ID                string                      `json:"id"`
+	Type              string                      `json:"type"`
+	Tool              string                      `json:"tool,omitempty"`
+	Status            string                      `json:"status,omitempty"`
+	SenderThreadID    string                      `json:"senderThreadId,omitempty"`
+	ReceiverThreadIDs []string                    `json:"receiverThreadIds,omitempty"`
+	Prompt            *string                     `json:"prompt,omitempty"`
+	Model             *string                     `json:"model,omitempty"`
+	ReasoningEffort   *string                     `json:"reasoningEffort,omitempty"`
+	AgentsStates      map[string]CollabAgentState `json:"agentsStates,omitempty"`
+	Arguments         interface{}                 `json:"arguments,omitempty"`
+	Result            interface{}                 `json:"result,omitempty"`
+	Error             *McpToolCallError           `json:"error,omitempty"`
 }
 
 // GetType returns the item type discriminator.
 func (i CollabToolCallItem) GetType() string {
 	return i.Type
+}
+
+type CollabAgentState struct {
+	Status  string  `json:"status"`
+	Message *string `json:"message,omitempty"`
 }
