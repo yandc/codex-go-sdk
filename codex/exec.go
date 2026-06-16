@@ -49,6 +49,7 @@ type CodexExecArgs struct {
 	WebSearchEnabled      *bool
 	ApprovalPolicy        string
 	ApprovalHandler       types.ApprovalHandler
+	CollaborationMode     *types.CollaborationMode
 }
 
 // ExecResult represents a result from executing codex.

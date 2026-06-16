@@ -19,6 +19,12 @@ type (
 	ModelReasoningEffort = types.ModelReasoningEffort
 	// WebSearchMode represents the web search mode.
 	WebSearchMode = types.WebSearchMode
+	// CollaborationModeKind selects the Codex collaboration mode.
+	CollaborationModeKind = types.CollaborationModeKind
+	// CollaborationModeSettings configures collaboration mode model behavior.
+	CollaborationModeSettings = types.CollaborationModeSettings
+	// CollaborationMode configures Codex collaboration mode for app-server turn/start.
+	CollaborationMode = types.CollaborationMode
 	// CommandExecutionStatus represents the status of a command execution.
 	CommandExecutionStatus = types.CommandExecutionStatus
 	// PatchChangeKind indicates the type of file change.
@@ -114,6 +120,17 @@ const (
 	WebSearchModeCached   = types.WebSearchModeCached
 	WebSearchModeLive     = types.WebSearchModeLive
 )
+
+// Constant values for CollaborationModeKind.
+const (
+	CollaborationModeDefault = types.CollaborationModeDefault
+	CollaborationModePlan    = types.CollaborationModePlan
+)
+
+// NewCollaborationMode creates a collaboration mode value.
+func NewCollaborationMode(mode CollaborationModeKind) *CollaborationMode {
+	return types.NewCollaborationMode(mode)
+}
 
 // Constant values for CommandExecutionStatus.
 const (

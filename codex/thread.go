@@ -79,7 +79,7 @@ func (t *Thread) runStreamedInternal(input types.Input, turnOptions types.TurnOp
 	inputItems := t.normalizeInputItems(input)
 
 	ctx := resolveTurnContext(turnOptions)
-	args := t.buildExecArgs(ctx, prompt, inputItems, images, schemaFile.SchemaPath)
+	args := t.buildExecArgs(ctx, prompt, inputItems, images, schemaFile.SchemaPath, turnOptions)
 
 	events := make(chan types.ThreadEvent)
 
@@ -129,7 +129,7 @@ func (t *Thread) subscribeEvents(ctx context.Context) (chan types.ThreadEvent, e
 		return nil, fmt.Errorf("thread id required")
 	}
 
-	args := t.buildExecArgs(ctx, "", nil, nil, "")
+	args := t.buildExecArgs(ctx, "", nil, nil, "", types.TurnOptions{})
 	events := make(chan types.ThreadEvent)
 
 	go func() {
@@ -176,9 +176,15 @@ func (t *Thread) buildExecArgs(
 	inputItems []types.UserInput,
 	images []string,
 	schemaPath string,
+	turnOptions types.TurnOptions,
 ) CodexExecArgs {
 	options := t.threadOptions
 	threadID := t.id
+	collaborationMode := options.CollaborationMode
+	if turnOptions.CollaborationMode != nil {
+		collaborationMode = turnOptions.CollaborationMode
+		t.threadOptions.CollaborationMode = turnOptions.CollaborationMode
+	}
 
 	return CodexExecArgs{
 		Input:                 prompt,
@@ -203,6 +209,7 @@ func (t *Thread) buildExecArgs(
 		ApprovalPolicy:        string(options.ApprovalPolicy),
 		ApprovalHandler:       options.ApprovalHandler,
 		AdditionalDirectories: options.AdditionalDirectories,
+		CollaborationMode:     collaborationMode,
 	}
 }
 
@@ -398,7 +405,7 @@ func (t *Thread) runReviewCommandStreamed(
 	}
 
 	ctx := resolveTurnContext(turnOptions)
-	args := t.buildExecArgs(ctx, "", nil, nil, "")
+	args := t.buildExecArgs(ctx, "", nil, nil, "", types.TurnOptions{})
 	events := make(chan types.ThreadEvent)
 
 	go func() {
@@ -447,7 +454,7 @@ func (t *Thread) runShellCommandStreamed(
 	}
 
 	ctx := resolveTurnContext(turnOptions)
-	args := t.buildExecArgs(ctx, "", nil, nil, "")
+	args := t.buildExecArgs(ctx, "", nil, nil, "", types.TurnOptions{})
 	events := make(chan types.ThreadEvent)
 
 	go func() {
@@ -581,7 +588,7 @@ func (t *Thread) setActiveGoalStreamed(
 	params types.ThreadGoalSetParams,
 ) (*types.StreamedTurn, error) {
 	if runner, ok := t.exec.(goalSetExec); ok {
-		args := t.buildExecArgs(ctx, "", nil, nil, "")
+		args := t.buildExecArgs(ctx, "", nil, nil, "", types.TurnOptions{})
 		events := make(chan types.ThreadEvent)
 
 		go func() {

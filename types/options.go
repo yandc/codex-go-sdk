@@ -41,6 +41,43 @@ const (
 	WebSearchModeLive     WebSearchMode = "live"
 )
 
+// CollaborationModeKind selects the Codex collaboration mode for a turn.
+type CollaborationModeKind string
+
+const (
+	CollaborationModeDefault CollaborationModeKind = "default"
+	CollaborationModePlan    CollaborationModeKind = "plan"
+)
+
+// CollaborationModeSettings configures the model behavior for a collaboration mode.
+//
+// App-server requires settings.model. SDK callers normally use
+// NewCollaborationMode and let the app-server transport fill model/effort from
+// the active thread or turn options before sending the request.
+type CollaborationModeSettings struct {
+	Model                 string                `json:"model"`
+	ReasoningEffort       *ModelReasoningEffort `json:"reasoning_effort,omitempty"`
+	DeveloperInstructions *string               `json:"developer_instructions,omitempty"`
+}
+
+// CollaborationMode configures Codex collaboration mode for turn/start.
+//
+// A nil DeveloperInstructions value lets app-server use built-in instructions for the mode.
+type CollaborationMode struct {
+	Mode     CollaborationModeKind     `json:"mode"`
+	Settings CollaborationModeSettings `json:"settings"`
+}
+
+// NewCollaborationMode creates a collaboration mode value.
+//
+// The app-server transport fills required settings from the active thread or
+// turn options before sending the request.
+func NewCollaborationMode(mode CollaborationModeKind) *CollaborationMode {
+	return &CollaborationMode{
+		Mode: mode,
+	}
+}
+
 // ApprovalDecision represents the decision for an approval request.
 type ApprovalDecision string
 
@@ -139,6 +176,9 @@ type ThreadOptions struct {
 	ApprovalHandler ApprovalHandler
 	// AdditionalDirectories are additional directories to include
 	AdditionalDirectories []string
+	// CollaborationMode selects the Codex collaboration mode for app-server turn/start.
+	// This is app-server-only. CLI transport ignores it.
+	CollaborationMode *CollaborationMode
 }
 
 // TurnOptions represents options for a turn.
@@ -147,4 +187,7 @@ type TurnOptions struct {
 	OutputSchema interface{}
 	// Context is a context.Context for cancellation (replaces AbortSignal from TypeScript)
 	Context interface{}
+	// CollaborationMode overrides the Codex collaboration mode for this and subsequent turns.
+	// This is app-server-only. CLI transport ignores it.
+	CollaborationMode *CollaborationMode
 }

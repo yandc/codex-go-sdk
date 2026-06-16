@@ -1013,6 +1013,13 @@ func (a *AppServerExec) buildTurnParams(threadID string, args CodexExecArgs) (ma
 	if approval := mapApprovalPolicy(args.ApprovalPolicy); approval != "" {
 		turnParams["approvalPolicy"] = approval
 	}
+	if args.CollaborationMode != nil {
+		turnParams["collaborationMode"] = buildCollaborationMode(
+			args.CollaborationMode,
+			args.Model,
+			args.ModelReasoningEffort,
+		)
+	}
 
 	schema, hasSchema, schemaErr := loadOutputSchema(args.OutputSchemaFile)
 	if schemaErr != nil {
@@ -1023,6 +1030,26 @@ func (a *AppServerExec) buildTurnParams(threadID string, args CodexExecArgs) (ma
 	}
 
 	return turnParams, nil
+}
+
+func buildCollaborationMode(
+	mode *types.CollaborationMode,
+	model string,
+	effort string,
+) *types.CollaborationMode {
+	if mode == nil {
+		return nil
+	}
+	next := *mode
+	next.Settings = mode.Settings
+	if strings.TrimSpace(next.Settings.Model) == "" {
+		next.Settings.Model = strings.TrimSpace(model)
+	}
+	if next.Settings.ReasoningEffort == nil && strings.TrimSpace(string(effort)) != "" {
+		value := types.ModelReasoningEffort(effort)
+		next.Settings.ReasoningEffort = &value
+	}
+	return &next
 }
 
 func (a *AppServerExec) streamTurn(

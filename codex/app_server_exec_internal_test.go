@@ -53,6 +53,62 @@ func TestBuildThreadResumeParamsIncludesPermissions(t *testing.T) {
 	assertParam(t, params, "cwd", "/tmp/project")
 }
 
+func TestBuildTurnParamsIncludesCollaborationMode(t *testing.T) {
+	exec := NewAppServerExec("", nil, nil, types.ClientInfo{}, "", "")
+	effort := types.ModelReasoningEffortMedium
+
+	params, err := exec.buildTurnParams("thread-1", CodexExecArgs{
+		Input:                "plan this",
+		Model:                "gpt-5.3-codex",
+		ModelReasoningEffort: string(effort),
+		CollaborationMode:    types.NewCollaborationMode(types.CollaborationModePlan),
+	})
+	if err != nil {
+		t.Fatalf("buildTurnParams returned error: %v", err)
+	}
+
+	mode, ok := params["collaborationMode"].(*types.CollaborationMode)
+	if !ok {
+		t.Fatalf("collaborationMode param has type %T", params["collaborationMode"])
+	}
+	if mode.Mode != types.CollaborationModePlan {
+		t.Fatalf("mode: got %q, want %q", mode.Mode, types.CollaborationModePlan)
+	}
+	if mode.Settings.Model != "gpt-5.3-codex" {
+		t.Fatalf("model: got %q", mode.Settings.Model)
+	}
+	if mode.Settings.ReasoningEffort == nil || *mode.Settings.ReasoningEffort != effort {
+		t.Fatalf("reasoning effort: got %v, want %q", mode.Settings.ReasoningEffort, effort)
+	}
+}
+
+func TestBuildTurnParamsIncludesDefaultCollaborationMode(t *testing.T) {
+	exec := NewAppServerExec("", nil, nil, types.ClientInfo{}, "", "")
+
+	params, err := exec.buildTurnParams("thread-1", CodexExecArgs{
+		Input:             "resume coding",
+		Model:             "gpt-5.3-codex",
+		CollaborationMode: types.NewCollaborationMode(types.CollaborationModeDefault),
+	})
+	if err != nil {
+		t.Fatalf("buildTurnParams returned error: %v", err)
+	}
+
+	mode, ok := params["collaborationMode"].(*types.CollaborationMode)
+	if !ok {
+		t.Fatalf("collaborationMode param has type %T", params["collaborationMode"])
+	}
+	if mode.Mode != types.CollaborationModeDefault {
+		t.Fatalf("mode: got %q, want %q", mode.Mode, types.CollaborationModeDefault)
+	}
+	if mode.Settings.Model != "gpt-5.3-codex" {
+		t.Fatalf("model: got %q", mode.Settings.Model)
+	}
+	if mode.Settings.ReasoningEffort != nil {
+		t.Fatalf("reasoning effort: got %v, want nil", mode.Settings.ReasoningEffort)
+	}
+}
+
 func TestHandleLineDispatchesServerRequestWithID(t *testing.T) {
 	exec := NewAppServerExec("", nil, nil, types.ClientInfo{}, "", "")
 	sub := exec.subscribe()

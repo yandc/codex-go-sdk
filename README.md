@@ -189,12 +189,29 @@ Notes:
 - `ApprovalPolicy`: Approval policy (`never`, `on-request`, `on-failure`, `untrusted`).
 - `ApprovalHandler`: App-server callback to approve or reject requested actions.
 - `AdditionalDirectories`: Additional directories to grant access to.
+- `CollaborationMode`: App-server collaboration mode override, e.g. plan/default mode.
 
 Notes:
 
 - CLI-only options (`SkipGitRepoCheck`, `DisableSkills`, `WebSearchMode`, `WebSearchEnabled`) are currently ignored in app-server transport.
 - `ApprovalHandler` only applies to app-server transport. CLI transport does not surface approval requests.
 - `NetworkAccessEnabled` is enforced via sandbox policy in app-server transport; in CLI transport it maps to CLI config where supported.
+- `CollaborationMode` only applies to app-server `turn/start`. CLI transport ignores it.
+
+Plan mode example:
+
+```go
+thread := client.NewThread(codex.ThreadOptions{
+    Model: "gpt-5.3-codex",
+    ModelReasoningEffort: codex.ModelReasoningEffortMedium,
+    CollaborationMode: codex.NewCollaborationMode(codex.CollaborationModePlan),
+})
+
+// Later, explicitly switch back. Collaboration mode is sticky on the thread.
+_, err := thread.Run("continue implementation", codex.TurnOptions{
+    CollaborationMode: codex.NewCollaborationMode(codex.CollaborationModeDefault),
+})
+```
 
 Input control (skills/mentions/images):
 
