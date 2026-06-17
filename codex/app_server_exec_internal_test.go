@@ -201,6 +201,58 @@ func TestSubmitApprovalRespondsToFileChangeRequest(t *testing.T) {
 	}
 }
 
+func TestSubmitAskUserResponseRespondsToRequestUserInput(t *testing.T) {
+	stdin := &captureWriteCloser{}
+	exec := &AppServerExec{stdin: stdin}
+	requestID := int64(11)
+	event := appEvent{
+		ID:     &requestID,
+		Method: "item/tool/requestUserInput",
+		Params: json.RawMessage(`{"threadId":"thread-1","turnId":"turn-1","itemId":"call-1","questions":[{"id":"choice","header":"Choose","question":"Pick one","options":[{"label":"A","description":"Use A"}]}]}`),
+	}
+
+	called := false
+	exec.submitAskUserResponse(event, func(req types.AskUserRequest) (types.AskUserResponse, error) {
+		called = true
+		if req.ThreadID != "thread-1" {
+			t.Fatalf("unexpected thread id %q", req.ThreadID)
+		}
+		if req.ItemID != "call-1" {
+			t.Fatalf("unexpected item id %q", req.ItemID)
+		}
+		if len(req.Questions) != 1 || req.Questions[0].ID != "choice" {
+			t.Fatalf("unexpected questions %#v", req.Questions)
+		}
+		return types.AskUserResponse{
+			Answers: map[string]types.AskUserAnswer{
+				"choice": {Answers: []string{"A"}},
+			},
+		}, nil
+	})
+
+	if !called {
+		t.Fatal("ask user handler was not called")
+	}
+	var response struct {
+		ID     int64 `json:"id"`
+		Result struct {
+			Answers map[string]struct {
+				Answers []string `json:"answers"`
+			} `json:"answers"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(stdin.Bytes()), &response); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if response.ID != 11 {
+		t.Fatalf("unexpected response id %d", response.ID)
+	}
+	got := response.Result.Answers["choice"].Answers
+	if len(got) != 1 || got[0] != "A" {
+		t.Fatalf("unexpected answer %#v", got)
+	}
+}
+
 func TestGoalContinuationIgnoresOtherThreadTurnBeforeOwnTurn(t *testing.T) {
 	exec := NewAppServerExec("", nil, nil, types.ClientInfo{}, "", "")
 	sub := make(chan appEvent, 8)

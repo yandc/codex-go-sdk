@@ -200,6 +200,18 @@ type (
 	ApprovalRequest = types.ApprovalRequest
 	// ApprovalHandler handles approval requests from the app server.
 	ApprovalHandler = types.ApprovalHandler
+	// AskUserQuestionOption is one selectable option for request_user_input.
+	AskUserQuestionOption = types.AskUserQuestionOption
+	// AskUserQuestion describes one request_user_input question.
+	AskUserQuestion = types.AskUserQuestion
+	// AskUserRequest carries a pending request_user_input request.
+	AskUserRequest = types.AskUserRequest
+	// AskUserAnswer is the answer for one request_user_input question.
+	AskUserAnswer = types.AskUserAnswer
+	// AskUserResponse resolves a request_user_input request.
+	AskUserResponse = types.AskUserResponse
+	// AskUserHandler handles request_user_input requests from the app server.
+	AskUserHandler = types.AskUserHandler
 	// ModelListParams configures model catalog queries.
 	ModelListParams = types.ModelListParams
 	// ModelListResponse contains paginated model catalog results.

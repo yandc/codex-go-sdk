@@ -208,6 +208,7 @@ func (t *Thread) buildExecArgs(
 		WebSearchEnabled:      options.WebSearchEnabled,
 		ApprovalPolicy:        string(options.ApprovalPolicy),
 		ApprovalHandler:       options.ApprovalHandler,
+		AskUserHandler:        options.AskUserHandler,
 		AdditionalDirectories: options.AdditionalDirectories,
 		CollaborationMode:     collaborationMode,
 	}

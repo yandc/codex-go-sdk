@@ -97,6 +97,43 @@ type ApprovalRequest struct {
 // ApprovalHandler decides how to respond to an approval request.
 type ApprovalHandler func(request ApprovalRequest) (ApprovalDecision, error)
 
+// AskUserQuestionOption is one selectable option for a request_user_input question.
+type AskUserQuestionOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description"`
+}
+
+// AskUserQuestion describes one question from the request_user_input tool.
+type AskUserQuestion struct {
+	ID       string                  `json:"id"`
+	Header   string                  `json:"header"`
+	Question string                  `json:"question"`
+	IsOther  bool                    `json:"isOther,omitempty"`
+	IsSecret bool                    `json:"isSecret,omitempty"`
+	Options  []AskUserQuestionOption `json:"options,omitempty"`
+}
+
+// AskUserRequest carries a pending request_user_input app-server request.
+type AskUserRequest struct {
+	ThreadID  string            `json:"threadId"`
+	TurnID    string            `json:"turnId"`
+	ItemID    string            `json:"itemId"`
+	Questions []AskUserQuestion `json:"questions"`
+}
+
+// AskUserAnswer is the answer for one request_user_input question.
+type AskUserAnswer struct {
+	Answers []string `json:"answers"`
+}
+
+// AskUserResponse is sent back to app-server to resolve request_user_input.
+type AskUserResponse struct {
+	Answers map[string]AskUserAnswer `json:"answers"`
+}
+
+// AskUserHandler decides how to answer a request_user_input request.
+type AskUserHandler func(request AskUserRequest) (AskUserResponse, error)
+
 // TransportMode represents the backend transport used by the SDK.
 type TransportMode string
 
@@ -174,6 +211,8 @@ type ThreadOptions struct {
 	ApprovalPolicy ApprovalMode
 	// ApprovalHandler handles approval requests when the app server asks for permission.
 	ApprovalHandler ApprovalHandler
+	// AskUserHandler handles request_user_input requests when app-server asks the user.
+	AskUserHandler AskUserHandler
 	// AdditionalDirectories are additional directories to include
 	AdditionalDirectories []string
 	// CollaborationMode selects the Codex collaboration mode for app-server turn/start.

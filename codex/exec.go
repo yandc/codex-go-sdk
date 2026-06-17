@@ -49,6 +49,7 @@ type CodexExecArgs struct {
 	WebSearchEnabled      *bool
 	ApprovalPolicy        string
 	ApprovalHandler       types.ApprovalHandler
+	AskUserHandler        types.AskUserHandler
 	CollaborationMode     *types.CollaborationMode
 }
 

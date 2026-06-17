@@ -685,6 +685,9 @@ func (a *AppServerExec) subscribeThreadEvents(args CodexExecArgs, output chan Ex
 			if args.ApprovalHandler != nil && isApprovalRequestedEvent(event.Method) {
 				a.submitApproval(ctx, event, args.ApprovalHandler)
 			}
+			if args.AskUserHandler != nil && isRequestUserInputEvent(event.Method) {
+				a.submitAskUserResponse(event, args.AskUserHandler)
+			}
 			line, done, err := appEventToLegacyLine(event, state)
 			if err != nil {
 				return err
@@ -1120,6 +1123,10 @@ func isApprovalRequestedEvent(method string) bool {
 		method == "item/fileChange/approvalRequested"
 }
 
+func isRequestUserInputEvent(method string) bool {
+	return method == "item/tool/requestUserInput"
+}
+
 //go:embed current_version
 var codexSDKVersion string
 
@@ -1262,6 +1269,9 @@ func (a *AppServerExec) handleTurnEvent(
 	}
 	if args.ApprovalHandler != nil && isApprovalRequestedEvent(event.Method) {
 		a.submitApproval(ctx, event, args.ApprovalHandler)
+	}
+	if args.AskUserHandler != nil && isRequestUserInputEvent(event.Method) {
+		a.submitAskUserResponse(event, args.AskUserHandler)
 	}
 	line, done, err := appEventToLegacyLine(event, state)
 	if err != nil {
@@ -1441,6 +1451,28 @@ func (a *AppServerExec) submitApproval(ctx context.Context, event appEvent, hand
 	_, submitErr := a.call(ctx, "approval/submit", payload)
 	if submitErr != nil {
 		a.logf("app server: approval submit error: %v", submitErr)
+	}
+}
+
+func (a *AppServerExec) submitAskUserResponse(event appEvent, handler types.AskUserHandler) {
+	if event.ID == nil {
+		return
+	}
+	var request types.AskUserRequest
+	if err := json.Unmarshal(event.Params, &request); err != nil {
+		a.logf("app server: failed to parse request_user_input request: %v", err)
+		return
+	}
+	response, err := handler(request)
+	if err != nil {
+		a.logf("app server: request_user_input handler error: %v", err)
+		return
+	}
+	if len(response.Answers) == 0 {
+		return
+	}
+	if submitErr := a.sendResponse(*event.ID, response); submitErr != nil {
+		a.logf("app server: request_user_input response error: %v", submitErr)
 	}
 }
 
