@@ -24,6 +24,10 @@ func (m *mockRPCExec) RPCCall(_ context.Context, method string, params interface
 	switch method {
 	case "thread/start":
 		return json.RawMessage(`{"thread":{"id":"thread-goal-1"}}`), nil
+	case "thread/fork":
+		return json.RawMessage(`{"thread":{"id":"thread-fork-1","turns":[{"items":[{"type":"userMessage","text":"one"}]},{"items":[{"type":"userMessage","text":"two"}]},{"items":[{"type":"message","role":"user","text":"three"}]},{"items":[{"type":"user_message","text":"four"}]},{"items":[{"type":"agentMessage","text":"done"}]}]}}`), nil
+	case "thread/rollback":
+		return json.RawMessage(`{"thread":{"id":"thread-fork-1"}}`), nil
 	case "thread/goal/get":
 		return json.RawMessage(`{"goal":{"threadId":"thread-goal-1","objective":"Ship goal support","status":"active","tokenBudget":1000,"tokensUsed":25,"timeUsedSeconds":90,"createdAt":1,"updatedAt":2}}`), nil
 	case "thread/goal/set":
@@ -130,6 +134,70 @@ func TestConstants(t *testing.T) {
 	}
 	if codex.WebSearchModeLive != "live" {
 		t.Error("WebSearchModeLive mismatch")
+	}
+}
+
+func TestForkThreadTruncatesWithRollback(t *testing.T) {
+	exec := &mockRPCExec{}
+	client := codex.NewCodexWithExec(exec, types.CodexOptions{Transport: types.TransportAppServer})
+	ordinal := 3
+	thread, err := client.ForkThread(context.Background(), "thread-source-1", types.ThreadForkOptions{
+		ThreadOptions: types.ThreadOptions{
+			Model:                "gpt-5.3-codex",
+			WorkingDirectory:     "/tmp/project",
+			FastService:          "on",
+			SandboxMode:          types.SandboxModeFullAccess,
+			ApprovalPolicy:       types.ApprovalModeNever,
+			ModelReasoningEffort: types.ModelReasoningEffortHigh,
+		},
+		TruncateBeforeNthUserMessage: &ordinal,
+	})
+	if err != nil {
+		t.Fatalf("ForkThread returned error: %v", err)
+	}
+	if thread == nil || thread.ID() == nil || *thread.ID() != "thread-fork-1" {
+		t.Fatalf("forked thread id = %#v", thread)
+	}
+	if len(exec.calls) != 2 {
+		t.Fatalf("expected 2 RPC calls, got %d", len(exec.calls))
+	}
+	call := exec.calls[0]
+	if call.method != "thread/fork" {
+		t.Fatalf("method = %q, want thread/fork", call.method)
+	}
+	params, ok := call.params.(map[string]interface{})
+	if !ok {
+		t.Fatalf("params type = %T", call.params)
+	}
+	if got := params["threadId"]; got != "thread-source-1" {
+		t.Fatalf("threadId = %#v", got)
+	}
+	if _, ok := params["truncateBeforeNthUserMessage"]; ok {
+		t.Fatalf("thread/fork should not receive unsupported truncateBeforeNthUserMessage param")
+	}
+	if got := params["serviceTier"]; got != "fast" {
+		t.Fatalf("serviceTier = %#v", got)
+	}
+	config, ok := params["config"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("config type = %T", params["config"])
+	}
+	if got := config["model_reasoning_effort"]; got != "high" {
+		t.Fatalf("model_reasoning_effort = %#v", got)
+	}
+	rollbackCall := exec.calls[1]
+	if rollbackCall.method != "thread/rollback" {
+		t.Fatalf("method = %q, want thread/rollback", rollbackCall.method)
+	}
+	rollbackParams, ok := rollbackCall.params.(map[string]interface{})
+	if !ok {
+		t.Fatalf("rollback params type = %T", rollbackCall.params)
+	}
+	if got := rollbackParams["threadId"]; got != "thread-fork-1" {
+		t.Fatalf("rollback threadId = %#v", got)
+	}
+	if got := rollbackParams["numTurns"]; got != 2 {
+		t.Fatalf("rollback numTurns = %#v", got)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/fanwenlin/codex-go-sdk/types"
 )
@@ -101,6 +102,40 @@ func (c *Codex) ResumeThread(id string, options types.ThreadOptions) *Thread {
 	return newThread(c.exec, c.options, options, &id)
 }
 
+// ForkThread forks an existing app-server thread and returns the forked thread.
+func (c *Codex) ForkThread(ctx context.Context, sourceThreadID string, options types.ThreadForkOptions) (*Thread, error) {
+	sourceThreadID = strings.TrimSpace(sourceThreadID)
+	if sourceThreadID == "" {
+		return nil, errors.New("source thread id required")
+	}
+	params := buildThreadForkParams(sourceThreadID, options)
+	var response struct {
+		Thread struct {
+			ID    string     `json:"id"`
+			Turns []forkTurn `json:"turns"`
+		} `json:"thread"`
+	}
+	if err := c.AppServerRPCTyped(ctx, "thread/fork", params, &response); err != nil {
+		return nil, err
+	}
+	threadID := strings.TrimSpace(response.Thread.ID)
+	if threadID == "" {
+		return nil, errors.New("thread/fork did not return thread id")
+	}
+	if options.TruncateBeforeNthUserMessage != nil {
+		rollbackTurns, err := rollbackTurnsAfterUserOrdinal(response.Thread.Turns, *options.TruncateBeforeNthUserMessage)
+		if err != nil {
+			return nil, err
+		}
+		if rollbackTurns > 0 {
+			if err := c.rollbackThread(ctx, threadID, rollbackTurns); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return newThread(c.exec, c.options, options.ThreadOptions, &threadID), nil
+}
+
 func (c *Codex) SubscribeThreadEvents(ctx context.Context, threadID string, options types.ThreadOptions) (*types.StreamedTurn, error) {
 	thread := c.ResumeThread(threadID, options)
 	events, err := thread.subscribeEvents(ctx)
@@ -158,4 +193,84 @@ func (c *Codex) Close() error {
 		return exec.Close()
 	}
 	return nil
+}
+
+func buildThreadForkParams(sourceThreadID string, options types.ThreadForkOptions) map[string]interface{} {
+	params := map[string]interface{}{
+		"threadId": strings.TrimSpace(sourceThreadID),
+	}
+	appendThreadContextParams(params, CodexExecArgs{
+		Model:                strings.TrimSpace(options.Model),
+		ModelProvider:        strings.TrimSpace(options.ModelProvider),
+		FastService:          options.FastService,
+		WorkingDirectory:     strings.TrimSpace(options.WorkingDirectory),
+		SandboxMode:          string(options.SandboxMode),
+		ApprovalPolicy:       string(options.ApprovalPolicy),
+		ModelReasoningEffort: string(options.ModelReasoningEffort),
+	}, strings.TrimSpace(options.ModelProvider))
+	if effort := strings.TrimSpace(string(options.ModelReasoningEffort)); effort != "" {
+		params["config"] = map[string]interface{}{"model_reasoning_effort": effort}
+	}
+	return params
+}
+
+type forkTurn struct {
+	Items []json.RawMessage `json:"items"`
+}
+
+func rollbackTurnsAfterUserOrdinal(turns []forkTurn, ordinal int) (int, error) {
+	if ordinal < 0 {
+		return 0, errors.New("truncate user ordinal must be >= 0")
+	}
+	if len(turns) == 0 {
+		return 0, errors.New("thread/fork did not return turns for truncate")
+	}
+	userCount := 0
+	for index, turn := range turns {
+		userCount += countUserMessages(turn.Items)
+		if userCount > ordinal {
+			return len(turns) - index, nil
+		}
+	}
+	return 0, nil
+}
+
+func countUserMessages(items []json.RawMessage) int {
+	count := 0
+	for _, item := range items {
+		if isUserMessageItem(item) {
+			count++
+		}
+	}
+	return count
+}
+
+func isUserMessageItem(item json.RawMessage) bool {
+	var meta struct {
+		Type string `json:"type"`
+		Role string `json:"role"`
+	}
+	if err := json.Unmarshal(item, &meta); err != nil {
+		return false
+	}
+	itemType := strings.ToLower(strings.TrimSpace(meta.Type))
+	if itemType == "usermessage" || itemType == "user_message" {
+		return true
+	}
+	return itemType == "message" && strings.EqualFold(strings.TrimSpace(meta.Role), "user")
+}
+
+func (c *Codex) rollbackThread(ctx context.Context, threadID string, numTurns int) error {
+	if numTurns <= 0 {
+		return nil
+	}
+	var response struct {
+		Thread struct {
+			ID string `json:"id"`
+		} `json:"thread"`
+	}
+	return c.AppServerRPCTyped(ctx, "thread/rollback", map[string]interface{}{
+		"threadId": threadID,
+		"numTurns": numTurns,
+	}, &response)
 }

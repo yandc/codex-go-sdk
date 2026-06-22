@@ -220,6 +220,14 @@ type ThreadOptions struct {
 	CollaborationMode *CollaborationMode
 }
 
+// ThreadForkOptions represents options for forking an existing thread.
+type ThreadForkOptions struct {
+	ThreadOptions
+	// TruncateBeforeNthUserMessage cuts the forked history strictly before the
+	// nth user message. The index is zero-based.
+	TruncateBeforeNthUserMessage *int
+}
+
 // TurnOptions represents options for a turn.
 type TurnOptions struct {
 	// OutputSchema is a JSON schema describing the expected agent output

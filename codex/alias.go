@@ -194,6 +194,8 @@ type (
 	ClientInfo = types.ClientInfo
 	// ThreadOptions configures thread creation and resume behavior.
 	ThreadOptions = types.ThreadOptions
+	// ThreadForkOptions configures thread fork behavior.
+	ThreadForkOptions = types.ThreadForkOptions
 	// TurnOptions configures turn execution behavior.
 	TurnOptions = types.TurnOptions
 	// ApprovalRequest carries a pending approval request payload.
