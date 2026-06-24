@@ -93,6 +93,8 @@ func newThreadItem(itemType string) (ThreadItem, bool) {
 		return &ExitedReviewModeItem{}, true
 	case "compacted":
 		return &CompactedItem{}, true
+	case "contextCompaction":
+		return &CompactedItem{}, true
 	case "collabToolCall":
 		return &CollabToolCallItem{}, true
 	case "collabAgentToolCall":

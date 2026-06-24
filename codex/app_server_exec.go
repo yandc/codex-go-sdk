@@ -529,6 +529,20 @@ func (a *AppServerExec) RunShellCommand(args CodexExecArgs, command string) <-ch
 	return output
 }
 
+// RunCompact starts manual context compaction and streams progress until it completes.
+func (a *AppServerExec) RunCompact(args CodexExecArgs) <-chan ExecResult {
+	output := make(chan ExecResult)
+
+	go func() {
+		defer close(output)
+		if err := a.runCompact(args, output); err != nil {
+			output <- ExecResult{Error: err}
+		}
+	}()
+
+	return output
+}
+
 // RunGoalSet updates the thread goal and streams any goal continuation turn events.
 func (a *AppServerExec) RunGoalSet(
 	args CodexExecArgs,
@@ -697,6 +711,80 @@ func (a *AppServerExec) subscribeThreadEvents(args CodexExecArgs, output chan Ex
 			}
 			if done {
 				return finishStreamTurn(interruptSent, ctx.Err())
+			}
+		}
+	}
+}
+
+func (a *AppServerExec) runCompact(args CodexExecArgs, output chan ExecResult) error {
+	startErr := a.ensureStarted()
+	if startErr != nil {
+		return startErr
+	}
+
+	ctx := args.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	threadID, isNewThread, err := a.ensureThread(ctx, args)
+	if err != nil {
+		return err
+	}
+
+	if isNewThread {
+		threadStarted := map[string]interface{}{
+			"type":     "thread.started",
+			"threadId": threadID,
+		}
+		line, marshalErr := json.Marshal(threadStarted)
+		if marshalErr == nil {
+			output <- ExecResult{Line: string(line)}
+		}
+	}
+
+	sub := a.subscribe()
+	defer a.unsubscribe(sub)
+
+	_, err = a.call(ctx, "thread/compact/start", map[string]interface{}{
+		"threadId": threadID,
+	})
+	if err != nil {
+		return err
+	}
+
+	state := &turnState{
+		items: make(map[string]map[string]interface{}),
+	}
+	compactItemID := ""
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case event, ok := <-sub:
+			if !ok {
+				return nil
+			}
+			if !eventMatchesTurn(event, threadID, "") {
+				continue
+			}
+			line, done, err := appEventToLegacyLine(event, state)
+			if err != nil {
+				return err
+			}
+			if line != "" {
+				output <- ExecResult{Line: line}
+			}
+			if itemID, ok := contextCompactionItemID(event); ok {
+				if compactItemID == "" {
+					compactItemID = itemID
+				}
+				if event.Method == "item/completed" && (compactItemID == "" || itemID == compactItemID) {
+					return nil
+				}
+			}
+			if done && compactItemID != "" {
+				return nil
 			}
 		}
 	}
@@ -1311,6 +1399,14 @@ func appEventToLegacyLine(event appEvent, state *turnState) (string, bool, error
 	payload["type"] = strings.ReplaceAll(method, "/", ".")
 
 	if itemPayload, ok := payload["item"].(map[string]interface{}); ok {
+		if itemPayload["type"] == "contextCompaction" {
+			switch method {
+			case "item/started":
+				itemPayload["status"] = "running"
+			case "item/completed":
+				itemPayload["status"] = "complete"
+			}
+		}
 		if id, okID := itemPayload["id"].(string); okID {
 			state.items[id] = itemPayload
 		}
@@ -1390,6 +1486,22 @@ func eventMatchesTurn(event appEvent, threadID string, turnID string) bool {
 		return meta.ThreadID == threadID
 	}
 	return false
+}
+
+func contextCompactionItemID(event appEvent) (string, bool) {
+	if event.Method != "item/started" && event.Method != "item/completed" {
+		return "", false
+	}
+	var payload struct {
+		Item struct {
+			ID   string `json:"id"`
+			Type string `json:"type"`
+		} `json:"item"`
+	}
+	if err := json.Unmarshal(event.Params, &payload); err != nil {
+		return "", false
+	}
+	return payload.Item.ID, payload.Item.Type == "contextCompaction"
 }
 
 func (a *AppServerExec) submitApproval(ctx context.Context, event appEvent, handler types.ApprovalHandler) {

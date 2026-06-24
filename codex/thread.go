@@ -21,6 +21,10 @@ type shellCommandExec interface {
 	RunShellCommand(args CodexExecArgs, command string) <-chan ExecResult
 }
 
+type compactExec interface {
+	RunCompact(args CodexExecArgs) <-chan ExecResult
+}
+
 type goalSetExec interface {
 	RunGoalSet(args CodexExecArgs, params types.ThreadGoalSetParams) <-chan ExecResult
 }
@@ -511,6 +515,41 @@ func (t *Thread) runStatusCommandStreamed(
 func (t *Thread) runCompactCommandStreamed(
 	turnOptions types.TurnOptions,
 ) (*types.StreamedTurn, error) {
+	runner, ok := t.exec.(compactExec)
+	if ok {
+		ctx := resolveTurnContext(turnOptions)
+		args := t.buildExecArgs(ctx, "", nil, nil, "", types.TurnOptions{})
+		events := make(chan types.ThreadEvent)
+
+		go func() {
+			defer close(events)
+			resultChan := runner.RunCompact(args)
+			for result := range resultChan {
+				event, eventErr := t.processExecResult(result)
+				if eventErr != nil {
+					events <- &types.ThreadErrorEvent{
+						Type:    "error",
+						Message: eventErr.Error(),
+					}
+					return
+				}
+				if event == nil {
+					continue
+				}
+				if threadStarted, ok := event.(*types.ThreadStartedEvent); ok {
+					t.id = &threadStarted.ThreadId
+				}
+				select {
+				case events <- event:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+
+		return &types.StreamedTurn{Events: events}, nil
+	}
+
 	ctx := resolveTurnContext(turnOptions)
 	threadID, err := t.ensureAppServerThread(ctx)
 	if err != nil {

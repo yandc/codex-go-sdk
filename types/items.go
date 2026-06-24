@@ -317,6 +317,7 @@ type CompactedItem struct {
 	ID      string `json:"id"`
 	Type    string `json:"type"`
 	Summary string `json:"summary,omitempty"`
+	Status  string `json:"status,omitempty"`
 }
 
 // GetType returns the item type discriminator.

@@ -1137,6 +1137,50 @@ func TestItemStartedEvent_CompactedItem(t *testing.T) {
 	}
 }
 
+func TestContextCompactionItemStatus(t *testing.T) {
+	startedPayload := []byte(`{
+		"type": "item.started",
+		"item": {
+			"type": "contextCompaction",
+			"id": "compact-1",
+			"status": "running"
+		}
+	}`)
+
+	var started types.ItemStartedEvent
+	if err := json.Unmarshal(startedPayload, &started); err != nil {
+		t.Fatalf("unmarshal context compaction started failed: %v", err)
+	}
+	startedItem, ok := started.Item.(*types.CompactedItem)
+	if !ok {
+		t.Fatalf("expected CompactedItem, got %T", started.Item)
+	}
+	if startedItem.Status != "running" {
+		t.Fatalf("expected started status %q, got %q", "running", startedItem.Status)
+	}
+
+	completedPayload := []byte(`{
+		"type": "item.completed",
+		"item": {
+			"type": "contextCompaction",
+			"id": "compact-1",
+			"status": "complete"
+		}
+	}`)
+
+	var completed types.ItemCompletedEvent
+	if err := json.Unmarshal(completedPayload, &completed); err != nil {
+		t.Fatalf("unmarshal context compaction completed failed: %v", err)
+	}
+	completedItem, ok := completed.Item.(*types.CompactedItem)
+	if !ok {
+		t.Fatalf("expected CompactedItem, got %T", completed.Item)
+	}
+	if completedItem.Status != "complete" {
+		t.Fatalf("expected completed status %q, got %q", "complete", completedItem.Status)
+	}
+}
+
 func TestItemStartedEvent_CollabToolCall(t *testing.T) {
 	for _, itemType := range []string{"collabToolCall", "collabAgentToolCall"} {
 		t.Run(itemType, func(t *testing.T) {

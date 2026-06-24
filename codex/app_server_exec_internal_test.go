@@ -366,6 +366,53 @@ func TestStreamTurnIgnoresOtherThreadEvents(t *testing.T) {
 	}
 }
 
+func TestAppEventToLegacyLineContextCompactionStatus(t *testing.T) {
+	state := &turnState{items: make(map[string]map[string]interface{})}
+
+	startedLine, done, err := appEventToLegacyLine(appEvent{
+		Method: "item/started",
+		Params: json.RawMessage(`{"threadId":"thread-1","turnId":"turn-1","item":{"id":"compact-1","type":"contextCompaction"}}`),
+	}, state)
+	if err != nil {
+		t.Fatalf("started event conversion failed: %v", err)
+	}
+	if done {
+		t.Fatal("started event should not complete the stream")
+	}
+	assertContextCompactionStatus(t, startedLine, "running")
+
+	completedLine, done, err := appEventToLegacyLine(appEvent{
+		Method: "item/completed",
+		Params: json.RawMessage(`{"threadId":"thread-1","turnId":"turn-1","item":{"id":"compact-1","type":"contextCompaction"}}`),
+	}, state)
+	if err != nil {
+		t.Fatalf("completed event conversion failed: %v", err)
+	}
+	if done {
+		t.Fatal("item completed event should not be treated as turn completion")
+	}
+	assertContextCompactionStatus(t, completedLine, "complete")
+}
+
+func assertContextCompactionStatus(t *testing.T, line string, want string) {
+	t.Helper()
+	var payload struct {
+		Item struct {
+			Type   string `json:"type"`
+			Status string `json:"status"`
+		} `json:"item"`
+	}
+	if err := json.Unmarshal([]byte(line), &payload); err != nil {
+		t.Fatalf("failed to unmarshal line %q: %v", line, err)
+	}
+	if payload.Item.Type != "contextCompaction" {
+		t.Fatalf("item type = %q, want contextCompaction", payload.Item.Type)
+	}
+	if payload.Item.Status != want {
+		t.Fatalf("item status = %q, want %q", payload.Item.Status, want)
+	}
+}
+
 func assertParam(t *testing.T, params map[string]interface{}, key string, want interface{}) {
 	t.Helper()
 	got, ok := params[key]
