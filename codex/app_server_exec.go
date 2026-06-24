@@ -331,6 +331,18 @@ func (a *AppServerExec) RPCCall(ctx context.Context, method string, params inter
 	return a.call(ctx, method, params)
 }
 
+// LoginChatGPTDeviceCode starts account/login/start with type chatgptDeviceCode and streams login progress.
+func (a *AppServerExec) LoginChatGPTDeviceCode(ctx context.Context) <-chan types.LoginEvent {
+	output := make(chan types.LoginEvent)
+	go func() {
+		defer close(output)
+		if err := a.loginChatGPTDeviceCode(ctx, output); err != nil {
+			output <- types.LoginEvent{Status: "error", Error: err.Error()}
+		}
+	}()
+	return output
+}
+
 func (a *AppServerExec) notify(method string, params interface{}) error {
 	return a.sendRequest(0, method, params)
 }
@@ -784,6 +796,81 @@ func (a *AppServerExec) runCompact(args CodexExecArgs, output chan ExecResult) e
 				}
 			}
 			if done && compactItemID != "" {
+				return nil
+			}
+		}
+	}
+}
+
+func (a *AppServerExec) loginChatGPTDeviceCode(ctx context.Context, output chan types.LoginEvent) error {
+	if err := a.ensureStarted(); err != nil {
+		return err
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	sub := a.subscribe()
+	defer a.unsubscribe(sub)
+
+	var response types.LoginAccountDeviceCodeResponse
+	result, err := a.call(ctx, "account/login/start", map[string]interface{}{
+		"type": "chatgptDeviceCode",
+	})
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(result, &response); err != nil {
+		return err
+	}
+	if strings.TrimSpace(response.LoginID) == "" {
+		return errors.New("app server did not return login id")
+	}
+	output <- types.LoginEvent{
+		Status:          "pending",
+		LoginID:         response.LoginID,
+		VerificationURL: response.VerificationURL,
+		UserCode:        response.UserCode,
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case event, ok := <-sub:
+			if !ok {
+				return nil
+			}
+			switch event.Method {
+			case "account/updated":
+				updated, ok, err := parseAccountUpdatedEvent(event)
+				if err != nil {
+					return err
+				}
+				if ok {
+					output <- types.LoginEvent{
+						Status:         "account_updated",
+						LoginID:        response.LoginID,
+						AccountUpdated: &updated,
+					}
+				}
+			case "account/login/completed":
+				completed, ok, err := parseAccountLoginCompletedEvent(event)
+				if err != nil {
+					return err
+				}
+				if !ok || completed.LoginID == nil || strings.TrimSpace(*completed.LoginID) != response.LoginID {
+					continue
+				}
+				if completed.Success {
+					output <- types.LoginEvent{Status: "success", LoginID: response.LoginID}
+				} else {
+					msg := "login failed"
+					if completed.Error != nil && strings.TrimSpace(*completed.Error) != "" {
+						msg = strings.TrimSpace(*completed.Error)
+					}
+					output <- types.LoginEvent{Status: "error", LoginID: response.LoginID, Error: msg}
+				}
 				return nil
 			}
 		}
@@ -1502,6 +1589,28 @@ func contextCompactionItemID(event appEvent) (string, bool) {
 		return "", false
 	}
 	return payload.Item.ID, payload.Item.Type == "contextCompaction"
+}
+
+func parseAccountLoginCompletedEvent(event appEvent) (types.AccountLoginCompletedNotification, bool, error) {
+	if event.Method != "account/login/completed" {
+		return types.AccountLoginCompletedNotification{}, false, nil
+	}
+	var payload types.AccountLoginCompletedNotification
+	if err := json.Unmarshal(event.Params, &payload); err != nil {
+		return types.AccountLoginCompletedNotification{}, false, err
+	}
+	return payload, true, nil
+}
+
+func parseAccountUpdatedEvent(event appEvent) (types.AccountUpdatedNotification, bool, error) {
+	if event.Method != "account/updated" {
+		return types.AccountUpdatedNotification{}, false, nil
+	}
+	var payload types.AccountUpdatedNotification
+	if err := json.Unmarshal(event.Params, &payload); err != nil {
+		return types.AccountUpdatedNotification{}, false, err
+	}
+	return payload, true, nil
 }
 
 func (a *AppServerExec) submitApproval(ctx context.Context, event appEvent, handler types.ApprovalHandler) {

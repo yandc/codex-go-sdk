@@ -162,6 +162,17 @@ func (c *Codex) ReadConfig(ctx context.Context, params types.ConfigReadParams) (
 	return &response, nil
 }
 
+// LoginChatGPTDeviceCode starts ChatGPT device-code login and streams progress until it completes.
+func (c *Codex) LoginChatGPTDeviceCode(ctx context.Context) (<-chan types.LoginEvent, error) {
+	exec, ok := c.exec.(interface {
+		LoginChatGPTDeviceCode(context.Context) <-chan types.LoginEvent
+	})
+	if !ok {
+		return nil, errors.New("ChatGPT device-code login is only supported by app-server transport")
+	}
+	return exec.LoginChatGPTDeviceCode(ctx), nil
+}
+
 // AppServerRPC executes an app-server RPC request and returns the raw result payload.
 func (c *Codex) AppServerRPC(ctx context.Context, method string, params interface{}) (json.RawMessage, error) {
 	if exec, ok := c.exec.(appServerRPCExec); ok {

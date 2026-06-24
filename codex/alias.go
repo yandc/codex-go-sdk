@@ -228,6 +228,14 @@ type (
 	GetAccountParams = types.GetAccountParams
 	// GetAccountResponse contains the account/read response.
 	GetAccountResponse = types.GetAccountResponse
+	// LoginEvent reports progress for a login flow.
+	LoginEvent = types.LoginEvent
+	// LoginAccountDeviceCodeResponse is returned by ChatGPT device code login start.
+	LoginAccountDeviceCodeResponse = types.LoginAccountDeviceCodeResponse
+	// AccountLoginCompletedNotification is emitted when a login attempt finishes.
+	AccountLoginCompletedNotification = types.AccountLoginCompletedNotification
+	// AccountUpdatedNotification is emitted when the active account changes.
+	AccountUpdatedNotification = types.AccountUpdatedNotification
 	// GetAccountRateLimitsResponse contains the account/rateLimits/read response.
 	GetAccountRateLimitsResponse = types.GetAccountRateLimitsResponse
 	// Account represents the active authentication state.

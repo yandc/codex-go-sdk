@@ -394,6 +394,36 @@ func TestAppEventToLegacyLineContextCompactionStatus(t *testing.T) {
 	assertContextCompactionStatus(t, completedLine, "complete")
 }
 
+func TestParseAccountLoginEvents(t *testing.T) {
+	completed, ok, err := parseAccountLoginCompletedEvent(appEvent{
+		Method: "account/login/completed",
+		Params: json.RawMessage(`{"loginId":"login-1","success":true,"error":null}`),
+	})
+	if err != nil {
+		t.Fatalf("parse completed failed: %v", err)
+	}
+	if !ok {
+		t.Fatal("completed event was not recognized")
+	}
+	if completed.LoginID == nil || *completed.LoginID != "login-1" || !completed.Success || completed.Error != nil {
+		t.Fatalf("completed = %#v", completed)
+	}
+
+	updated, ok, err := parseAccountUpdatedEvent(appEvent{
+		Method: "account/updated",
+		Params: json.RawMessage(`{"authMode":"chatgpt","planType":"plus"}`),
+	})
+	if err != nil {
+		t.Fatalf("parse updated failed: %v", err)
+	}
+	if !ok {
+		t.Fatal("updated event was not recognized")
+	}
+	if updated.AuthMode == nil || *updated.AuthMode != "chatgpt" || updated.PlanType == nil || *updated.PlanType != types.PlanTypePlus {
+		t.Fatalf("updated = %#v", updated)
+	}
+}
+
 func assertContextCompactionStatus(t *testing.T, line string, want string) {
 	t.Helper()
 	var payload struct {
