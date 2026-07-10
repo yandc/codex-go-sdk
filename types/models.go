@@ -10,6 +10,8 @@ const (
 	ReasoningEffortMedium  ReasoningEffort = "medium"
 	ReasoningEffortHigh    ReasoningEffort = "high"
 	ReasoningEffortXHigh   ReasoningEffort = "xhigh"
+	ReasoningEffortMax     ReasoningEffort = "max"
+	ReasoningEffortUltra   ReasoningEffort = "ultra"
 )
 
 // InputModality is a canonical user-input modality tag advertised by a model.

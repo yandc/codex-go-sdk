@@ -1163,6 +1163,8 @@ func (a *AppServerExec) startTurn(ctx context.Context, threadID string, args Cod
 }
 
 func (a *AppServerExec) buildTurnParams(threadID string, args CodexExecArgs) (map[string]interface{}, error) {
+	args = normalizeReasoningEffortForModel(args)
+
 	inputItems := buildInputItems(args)
 
 	turnParams := map[string]interface{}{
@@ -1225,6 +1227,13 @@ func buildCollaborationMode(
 	}
 	if next.Settings.ReasoningEffort == nil && strings.TrimSpace(string(effort)) != "" {
 		value := types.ModelReasoningEffort(effort)
+		next.Settings.ReasoningEffort = &value
+	}
+	if next.Settings.ReasoningEffort != nil {
+		value := types.ModelReasoningEffort(normalizeReasoningEffortValueForModel(
+			next.Settings.Model,
+			string(*next.Settings.ReasoningEffort),
+		))
 		next.Settings.ReasoningEffort = &value
 	}
 	return &next
@@ -1313,6 +1322,8 @@ const (
 )
 
 func (a *AppServerExec) ensureThread(ctx context.Context, args CodexExecArgs) (string, bool, error) {
+	args = normalizeReasoningEffortForModel(args)
+
 	requested := args.ThreadId
 	if requested == nil || *requested == "" {
 		params := buildThreadStartParams(args)

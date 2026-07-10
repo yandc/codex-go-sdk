@@ -30,6 +30,8 @@ const (
 	ModelReasoningEffortMedium  ModelReasoningEffort = "medium"
 	ModelReasoningEffortHigh    ModelReasoningEffort = "high"
 	ModelReasoningEffortXHigh   ModelReasoningEffort = "xhigh"
+	ModelReasoningEffortMax     ModelReasoningEffort = "max"
+	ModelReasoningEffortUltra   ModelReasoningEffort = "ultra"
 )
 
 // WebSearchMode represents the web search mode.

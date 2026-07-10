@@ -77,6 +77,8 @@ const (
 	ModelReasoningEffortMedium  = types.ModelReasoningEffortMedium
 	ModelReasoningEffortHigh    = types.ModelReasoningEffortHigh
 	ModelReasoningEffortXHigh   = types.ModelReasoningEffortXHigh
+	ModelReasoningEffortMax     = types.ModelReasoningEffortMax
+	ModelReasoningEffortUltra   = types.ModelReasoningEffortUltra
 )
 
 // Constant values for ReasoningEffort.
@@ -87,6 +89,8 @@ const (
 	ReasoningEffortMedium  = types.ReasoningEffortMedium
 	ReasoningEffortHigh    = types.ReasoningEffortHigh
 	ReasoningEffortXHigh   = types.ReasoningEffortXHigh
+	ReasoningEffortMax     = types.ReasoningEffortMax
+	ReasoningEffortUltra   = types.ReasoningEffortUltra
 )
 
 // Constant values for InputModality.

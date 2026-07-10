@@ -132,6 +132,18 @@ func TestConstants(t *testing.T) {
 	if codex.ModelReasoningEffortHigh != "high" {
 		t.Error("ModelReasoningEffortHigh mismatch")
 	}
+	if codex.ModelReasoningEffortMax != "max" {
+		t.Error("ModelReasoningEffortMax mismatch")
+	}
+	if codex.ModelReasoningEffortUltra != "ultra" {
+		t.Error("ModelReasoningEffortUltra mismatch")
+	}
+	if codex.ReasoningEffortMax != "max" {
+		t.Error("ReasoningEffortMax mismatch")
+	}
+	if codex.ReasoningEffortUltra != "ultra" {
+		t.Error("ReasoningEffortUltra mismatch")
+	}
 	if codex.WebSearchModeLive != "live" {
 		t.Error("WebSearchModeLive mismatch")
 	}

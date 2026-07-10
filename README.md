@@ -182,7 +182,7 @@ Notes:
 - `SkipGitRepoCheck`: Skip git repository check (CLI transport only).
 - `DisableSkills`: Disable skills feature (CLI transport only).
 - `FastService`: Fast service mode string. Use `on` to force fast service, `off` to explicitly clear it, or leave empty to omit `service_tier`.
-- `ModelReasoningEffort`: Reasoning effort (`minimal`, `low`, `medium`, `high`, `xhigh`).
+- `ModelReasoningEffort`: Reasoning effort (`minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`). `max` and `ultra` are sent as `xhigh` when a non-`gpt-5.6` model is specified.
 - `NetworkAccessEnabled`: Enable network access in sandbox policy/config.
 - `WebSearchMode`: Web search mode (`disabled`, `cached`, `live`), mainly for CLI transport.
 - `WebSearchEnabled`: Legacy boolean web search switch for compatibility.

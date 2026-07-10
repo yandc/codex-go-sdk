@@ -109,6 +109,93 @@ func TestBuildTurnParamsIncludesDefaultCollaborationMode(t *testing.T) {
 	}
 }
 
+func TestNormalizeReasoningEffortForModelKeepsMaxUltraForGPT56(t *testing.T) {
+	for _, effort := range []types.ModelReasoningEffort{
+		types.ModelReasoningEffortMax,
+		types.ModelReasoningEffortUltra,
+	} {
+		args := normalizeReasoningEffortForModel(CodexExecArgs{
+			Model:                "gpt-5.6-sol",
+			ModelReasoningEffort: string(effort),
+		})
+		if args.ModelReasoningEffort != string(effort) {
+			t.Fatalf("ModelReasoningEffort = %q, want %q", args.ModelReasoningEffort, effort)
+		}
+	}
+}
+
+func TestNormalizeReasoningEffortForModelDowngradesMaxUltraForOlderModels(t *testing.T) {
+	for _, effort := range []types.ModelReasoningEffort{
+		types.ModelReasoningEffortMax,
+		types.ModelReasoningEffortUltra,
+	} {
+		args := normalizeReasoningEffortForModel(CodexExecArgs{
+			Model:                "gpt-5.3-codex",
+			ModelReasoningEffort: string(effort),
+		})
+		if args.ModelReasoningEffort != string(types.ModelReasoningEffortXHigh) {
+			t.Fatalf("ModelReasoningEffort = %q, want %q", args.ModelReasoningEffort, types.ModelReasoningEffortXHigh)
+		}
+	}
+}
+
+func TestNormalizeReasoningEffortForModelKeepsDefaultModel(t *testing.T) {
+	args := normalizeReasoningEffortForModel(CodexExecArgs{
+		ModelReasoningEffort: string(types.ModelReasoningEffortUltra),
+	})
+	if args.ModelReasoningEffort != string(types.ModelReasoningEffortUltra) {
+		t.Fatalf("ModelReasoningEffort = %q, want %q", args.ModelReasoningEffort, types.ModelReasoningEffortUltra)
+	}
+}
+
+func TestBuildTurnParamsDowngradesMaxUltraForOlderModels(t *testing.T) {
+	exec := NewAppServerExec("", nil, nil, types.ClientInfo{}, "", "")
+
+	params, err := exec.buildTurnParams("thread-1", CodexExecArgs{
+		Input:                "code",
+		Model:                "gpt-5.3-codex",
+		ModelReasoningEffort: string(types.ModelReasoningEffortUltra),
+		CollaborationMode:    types.NewCollaborationMode(types.CollaborationModePlan),
+	})
+	if err != nil {
+		t.Fatalf("buildTurnParams returned error: %v", err)
+	}
+	assertParam(t, params, "effort", "xhigh")
+	mode, ok := params["collaborationMode"].(*types.CollaborationMode)
+	if !ok {
+		t.Fatalf("collaborationMode param has type %T", params["collaborationMode"])
+	}
+	if mode.Settings.ReasoningEffort == nil || *mode.Settings.ReasoningEffort != types.ModelReasoningEffortXHigh {
+		t.Fatalf("reasoning effort: got %v, want %q", mode.Settings.ReasoningEffort, types.ModelReasoningEffortXHigh)
+	}
+}
+
+func TestBuildTurnParamsDowngradesExplicitCollaborationModeEffort(t *testing.T) {
+	exec := NewAppServerExec("", nil, nil, types.ClientInfo{}, "", "")
+	effort := types.ModelReasoningEffortUltra
+
+	params, err := exec.buildTurnParams("thread-1", CodexExecArgs{
+		Input: "code",
+		CollaborationMode: &types.CollaborationMode{
+			Mode: types.CollaborationModePlan,
+			Settings: types.CollaborationModeSettings{
+				Model:           "gpt-5.3-codex",
+				ReasoningEffort: &effort,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildTurnParams returned error: %v", err)
+	}
+	mode, ok := params["collaborationMode"].(*types.CollaborationMode)
+	if !ok {
+		t.Fatalf("collaborationMode param has type %T", params["collaborationMode"])
+	}
+	if mode.Settings.ReasoningEffort == nil || *mode.Settings.ReasoningEffort != types.ModelReasoningEffortXHigh {
+		t.Fatalf("reasoning effort: got %v, want %q", mode.Settings.ReasoningEffort, types.ModelReasoningEffortXHigh)
+	}
+}
+
 func TestHandleLineDispatchesServerRequestWithID(t *testing.T) {
 	exec := NewAppServerExec("", nil, nil, types.ClientInfo{}, "", "")
 	sub := exec.subscribe()
