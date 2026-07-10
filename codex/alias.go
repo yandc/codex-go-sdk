@@ -287,6 +287,8 @@ type (
 const (
 	ThreadGoalStatusActive        = types.ThreadGoalStatusActive
 	ThreadGoalStatusPaused        = types.ThreadGoalStatusPaused
+	ThreadGoalStatusBlocked       = types.ThreadGoalStatusBlocked
+	ThreadGoalStatusUsageLimited  = types.ThreadGoalStatusUsageLimited
 	ThreadGoalStatusBudgetLimited = types.ThreadGoalStatusBudgetLimited
 	ThreadGoalStatusComplete      = types.ThreadGoalStatusComplete
 )

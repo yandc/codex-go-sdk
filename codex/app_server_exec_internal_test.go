@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -392,6 +394,94 @@ func TestGoalContinuationIgnoresOtherThreadTurnBeforeOwnTurn(t *testing.T) {
 		if bytes.Contains([]byte(line), []byte("thread-other")) || bytes.Contains([]byte(line), []byte("wrong stream")) {
 			t.Fatalf("cross-thread event leaked into goal stream: %s", line)
 		}
+	}
+}
+
+func TestGoalContinuationKeepsActiveGoalOpenAcrossPhysicalTurns(t *testing.T) {
+	exec := NewAppServerExec("", nil, nil, types.ClientInfo{}, "", "")
+	sub := make(chan appEvent, 16)
+	output := make(chan ExecResult, 16)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	activeGoal := &types.ThreadGoal{
+		ThreadID:  "thread-goal",
+		Objective: "keep working",
+		Status:    types.ThreadGoalStatusActive,
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- exec.streamGoalContinuation(ctx, "thread-goal", CodexExecArgs{}, activeGoal, sub, output)
+	}()
+
+	sub <- appEvent{
+		Method: "turn/started",
+		Params: json.RawMessage(`{"threadId":"thread-goal","turn":{"id":"turn-goal-1"}}`),
+	}
+	sub <- appEvent{
+		Method: "item/completed",
+		Params: json.RawMessage(`{"threadId":"thread-goal","turnId":"turn-goal-1","item":{"id":"msg-goal-1","type":"agentMessage","text":"first"}}`),
+	}
+	sub <- appEvent{
+		Method: "turn/completed",
+		Params: json.RawMessage(`{"threadId":"thread-goal","turnId":"turn-goal-1","usage":{"inputTokens":1,"cachedInputTokens":0,"outputTokens":1}}`),
+	}
+
+	select {
+	case err := <-errCh:
+		t.Fatalf("active goal stream ended after first physical turn: %v", err)
+	default:
+	}
+
+	sub <- appEvent{
+		Method: "turn/started",
+		Params: json.RawMessage(`{"threadId":"thread-goal","turn":{"id":"turn-goal-2"}}`),
+	}
+	sub <- appEvent{
+		Method: "item/completed",
+		Params: json.RawMessage(`{"threadId":"thread-goal","turnId":"turn-goal-2","item":{"id":"msg-goal-2","type":"agentMessage","text":"second"}}`),
+	}
+	sub <- appEvent{
+		Method: "thread/goal/updated",
+		Params: json.RawMessage(`{"threadId":"thread-goal","turnId":"turn-goal-2","goal":{"threadId":"thread-goal","objective":"keep working","status":"paused","createdAt":1,"updatedAt":2}}`),
+	}
+	sub <- appEvent{
+		Method: "turn/completed",
+		Params: json.RawMessage(`{"threadId":"thread-goal","turnId":"turn-goal-2","usage":{"inputTokens":1,"cachedInputTokens":0,"outputTokens":1}}`),
+	}
+
+	if err := <-errCh; err != nil {
+		t.Fatalf("streamGoalContinuation returned error: %v", err)
+	}
+	close(output)
+
+	var lines []string
+	for result := range output {
+		if result.Error != nil {
+			t.Fatalf("unexpected output error: %v", result.Error)
+		}
+		lines = append(lines, result.Line)
+	}
+	if len(lines) != 6 {
+		t.Fatalf("expected 6 logical lines, got %d: %v", len(lines), lines)
+	}
+	if bytes.Contains([]byte(strings.Join(lines, "\n")), []byte(`"turnId":"turn-goal-1","type":"turn.completed"`)) {
+		t.Fatalf("intermediate active goal completion leaked into logical stream: %v", lines)
+	}
+}
+
+func TestActiveTurnIDFromMismatchError(t *testing.T) {
+	err := errors.New("app server error (-32600): expected active turn id TURN_OLD but found TURN_NEW")
+	if got := activeTurnIDFromMismatchError(err); got != "TURN_NEW" {
+		t.Fatalf("activeTurnIDFromMismatchError = %q, want %q", got, "TURN_NEW")
+	}
+}
+
+func TestNoActiveTurnToInterruptError(t *testing.T) {
+	err := errors.New("app server error (-32600): no active turn to interrupt")
+	if !isNoActiveTurnToInterruptError(err) {
+		t.Fatal("expected no-active-turn interrupt error to be recognized")
 	}
 }
 

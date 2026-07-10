@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1011,6 +1012,9 @@ func (a *AppServerExec) streamGoalContinuation(
 	interruptCh := ctx.Done()
 	interruptPending := false
 	turnID := ""
+	goalStatus := goalStatusFromGoal(goal)
+	goalCleared := false
+	activeGoalTurn := false
 
 	for {
 		select {
@@ -1020,16 +1024,12 @@ func (a *AppServerExec) streamGoalContinuation(
 			}
 		case <-interruptCh:
 			interruptCh = nil
-			if turnID == "" {
-				return ctx.Err()
-			}
-			interruptCtx, cancel := context.WithTimeout(context.Background(), defaultInterruptTimeout)
-			err := a.interruptTurn(interruptCtx, threadID, turnID)
-			cancel()
-			if err != nil {
+			a.pauseGoalBestEffort(threadID)
+			if err := a.interruptGoalTurnBestEffort(threadID, turnID); err != nil {
 				return err
 			}
 			interruptPending = true
+			return finishStreamTurn(interruptPending, ctx.Err())
 		case event, ok := <-sub:
 			if !ok {
 				return finishStreamTurn(interruptPending, ctx.Err())
@@ -1038,18 +1038,151 @@ func (a *AppServerExec) streamGoalContinuation(
 				if id := eventTurnID(event); id != "" {
 					turnID = id
 				}
+				activeGoalTurn = true
 				sawTurn = true
 				stopTimer(startTimer)
+			}
+			if status, ok := goalStatusFromEvent(event, threadID); ok {
+				goalStatus = status
+				goalCleared = false
+			}
+			if goalClearedFromEvent(event, threadID) {
+				goalCleared = true
+			}
+			if isTurnDoneEvent(event.Method) &&
+				eventMatchesTurn(event, threadID, turnID) &&
+				goalStatus == types.ThreadGoalStatusActive &&
+				!goalCleared {
+				activeGoalTurn = false
+				turnID = ""
+				continue
 			}
 			done, err := a.handleTurnEvent(ctx, event, threadID, turnID, args, state, output)
 			if err != nil {
 				return err
 			}
 			if done {
+				activeGoalTurn = false
+				if goalStatus == types.ThreadGoalStatusActive && !goalCleared {
+					turnID = ""
+					continue
+				}
+				return finishStreamTurn(interruptPending, ctx.Err())
+			}
+			if !activeGoalTurn && (goalCleared || terminalGoalStatus(goalStatus)) {
 				return finishStreamTurn(interruptPending, ctx.Err())
 			}
 		}
 	}
+}
+
+func goalStatusFromGoal(goal *types.ThreadGoal) types.ThreadGoalStatus {
+	if goal == nil {
+		return ""
+	}
+	return goal.Status
+}
+
+func goalStatusFromEvent(event appEvent, threadID string) (types.ThreadGoalStatus, bool) {
+	if event.Method != "thread/goal/updated" {
+		return "", false
+	}
+	var payload struct {
+		ThreadID string `json:"threadId"`
+		Goal     struct {
+			Status types.ThreadGoalStatus `json:"status"`
+		} `json:"goal"`
+	}
+	if err := json.Unmarshal(event.Params, &payload); err != nil {
+		return "", false
+	}
+	if threadID != "" && payload.ThreadID != "" && payload.ThreadID != threadID {
+		return "", false
+	}
+	if payload.Goal.Status == "" {
+		return "", false
+	}
+	return payload.Goal.Status, true
+}
+
+func goalClearedFromEvent(event appEvent, threadID string) bool {
+	if event.Method != "thread/goal/cleared" {
+		return false
+	}
+	var payload struct {
+		ThreadID string `json:"threadId"`
+	}
+	if err := json.Unmarshal(event.Params, &payload); err != nil {
+		return false
+	}
+	return threadID == "" || payload.ThreadID == "" || payload.ThreadID == threadID
+}
+
+func terminalGoalStatus(status types.ThreadGoalStatus) bool {
+	switch status {
+	case types.ThreadGoalStatusPaused,
+		types.ThreadGoalStatusBlocked,
+		types.ThreadGoalStatusUsageLimited,
+		types.ThreadGoalStatusBudgetLimited,
+		types.ThreadGoalStatusComplete:
+		return true
+	default:
+		return false
+	}
+}
+
+func (a *AppServerExec) pauseGoalBestEffort(threadID string) {
+	if strings.TrimSpace(threadID) == "" {
+		return
+	}
+	status := types.ThreadGoalStatusPaused
+	ctx, cancel := context.WithTimeout(context.Background(), defaultInterruptTimeout)
+	defer cancel()
+	_, _ = a.call(ctx, "thread/goal/set", types.ThreadGoalSetParams{
+		ThreadID: threadID,
+		Status:   &status,
+	})
+}
+
+func (a *AppServerExec) interruptGoalTurnBestEffort(threadID string, turnID string) error {
+	turnID = strings.TrimSpace(turnID)
+	if turnID == "" {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultInterruptTimeout)
+	err := a.interruptTurn(ctx, threadID, turnID)
+	cancel()
+	if err == nil || isNoActiveTurnToInterruptError(err) {
+		return nil
+	}
+	nextTurnID := activeTurnIDFromMismatchError(err)
+	if nextTurnID == "" || nextTurnID == turnID {
+		return nil
+	}
+	ctx, cancel = context.WithTimeout(context.Background(), defaultInterruptTimeout)
+	err = a.interruptTurn(ctx, threadID, nextTurnID)
+	cancel()
+	if err == nil || isNoActiveTurnToInterruptError(err) || activeTurnIDFromMismatchError(err) != "" {
+		return nil
+	}
+	return nil
+}
+
+func isNoActiveTurnToInterruptError(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "no active turn to interrupt")
+}
+
+var activeTurnMismatchPattern = regexp.MustCompile("expected active turn id `?([^`\\s]+)`? but found `?([^`\\s]+)`?")
+
+func activeTurnIDFromMismatchError(err error) string {
+	if err == nil {
+		return ""
+	}
+	matches := activeTurnMismatchPattern.FindStringSubmatch(err.Error())
+	if len(matches) < 3 {
+		return ""
+	}
+	return strings.TrimSpace(matches[2])
 }
 
 func emitSyntheticGoalMessage(output chan ExecResult, goal *types.ThreadGoal) error {
@@ -1074,6 +1207,10 @@ func emitSyntheticGoalMessage(output chan ExecResult, goal *types.ThreadGoal) er
 
 func isTurnStartedEvent(method string) bool {
 	return method == "turn/started"
+}
+
+func isTurnDoneEvent(method string) bool {
+	return method == "turn/completed" || method == "turn/failed"
 }
 
 func eventTurnID(event appEvent) string {

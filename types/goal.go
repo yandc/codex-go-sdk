@@ -6,6 +6,8 @@ type ThreadGoalStatus string
 const (
 	ThreadGoalStatusActive        ThreadGoalStatus = "active"
 	ThreadGoalStatusPaused        ThreadGoalStatus = "paused"
+	ThreadGoalStatusBlocked       ThreadGoalStatus = "blocked"
+	ThreadGoalStatusUsageLimited  ThreadGoalStatus = "usageLimited"
 	ThreadGoalStatusBudgetLimited ThreadGoalStatus = "budgetLimited"
 	ThreadGoalStatusComplete      ThreadGoalStatus = "complete"
 )
