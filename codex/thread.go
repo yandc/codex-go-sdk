@@ -48,6 +48,41 @@ func (t *Thread) ID() *string {
 	return t.id
 }
 
+// SetCollaborationMode updates the app-server thread collaboration mode for subsequent turns.
+func (t *Thread) SetCollaborationMode(ctx context.Context, mode *types.CollaborationMode) error {
+	if mode == nil {
+		return fmt.Errorf("collaboration mode required")
+	}
+	threadID, err := t.ensureAppServerThread(ctx)
+	if err != nil {
+		return err
+	}
+	nextMode := buildCollaborationMode(mode, t.threadOptions.Model, string(t.threadOptions.ModelReasoningEffort))
+	if nextMode == nil {
+		return fmt.Errorf("collaboration mode required")
+	}
+
+	waitCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	updates, err := t.subscribeEvents(waitCtx)
+	if err != nil {
+		return err
+	}
+
+	if err := t.appServerRPCTyped(ctx, "thread/settings/update", map[string]interface{}{
+		"threadId":          threadID,
+		"collaborationMode": nextMode,
+	}, nil); err != nil {
+		return err
+	}
+	if err := waitForThreadCollaborationModeEvent(ctx, updates, threadID, nextMode.Mode); err != nil {
+		return err
+	}
+
+	t.threadOptions.CollaborationMode = mode
+	return nil
+}
+
 // newThread creates a new Thread instance.
 func newThread(exec Exec, options types.CodexOptions, threadOptions types.ThreadOptions, id *string) *Thread {
 	return &Thread{
@@ -56,6 +91,39 @@ func newThread(exec Exec, options types.CodexOptions, threadOptions types.Thread
 		id:            id,
 		threadOptions: threadOptions,
 	}
+}
+
+func waitForThreadCollaborationModeEvent(
+	ctx context.Context,
+	events <-chan types.ThreadEvent,
+	threadID string,
+	mode types.CollaborationModeKind,
+) error {
+	timer := time.NewTimer(defaultInterruptTimeout)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+			return fmt.Errorf("timed out waiting for thread settings collaboration mode %q", mode)
+		case event, ok := <-events:
+			if !ok {
+				return fmt.Errorf("thread settings stream closed")
+			}
+			if threadSettingsRawEventMatches(event, threadID, mode) {
+				return nil
+			}
+		}
+	}
+}
+
+func threadSettingsRawEventMatches(event types.ThreadEvent, threadID string, mode types.CollaborationModeKind) bool {
+	rawEvent, ok := event.(*types.RawEvent)
+	if !ok {
+		return false
+	}
+	return threadSettingsCollaborationModeLineMatches(rawEvent.Raw, threadID, mode)
 }
 
 // RunStreamed provides input to the agent and streams events as they are produced.

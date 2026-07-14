@@ -55,6 +55,24 @@ func TestBuildThreadResumeParamsIncludesPermissions(t *testing.T) {
 	assertParam(t, params, "cwd", "/tmp/project")
 }
 
+func TestBuildThreadResumeParamsIncludesCollaborationMode(t *testing.T) {
+	params := buildThreadResumeParams("thread-1", CodexExecArgs{
+		Model:             "test-model",
+		CollaborationMode: types.NewCollaborationMode(types.CollaborationModeDefault),
+	}, "openai")
+
+	mode, ok := params["collaborationMode"].(*types.CollaborationMode)
+	if !ok {
+		t.Fatalf("collaborationMode param has type %T", params["collaborationMode"])
+	}
+	if mode.Mode != types.CollaborationModeDefault {
+		t.Fatalf("mode: got %q, want %q", mode.Mode, types.CollaborationModeDefault)
+	}
+	if mode.Settings.Model != "test-model" {
+		t.Fatalf("model: got %q", mode.Settings.Model)
+	}
+}
+
 func TestBuildTurnParamsIncludesCollaborationMode(t *testing.T) {
 	exec := NewAppServerExec("", nil, nil, types.ClientInfo{}, "", "")
 	effort := types.ModelReasoningEffortMedium
@@ -468,6 +486,68 @@ func TestGoalContinuationKeepsActiveGoalOpenAcrossPhysicalTurns(t *testing.T) {
 	}
 	if bytes.Contains([]byte(strings.Join(lines, "\n")), []byte(`"turnId":"turn-goal-1","type":"turn.completed"`)) {
 		t.Fatalf("intermediate active goal completion leaked into logical stream: %v", lines)
+	}
+}
+
+func TestGoalContinuationDoesNotSynthesizeActiveGoalBeforeDelayedTurn(t *testing.T) {
+	exec := NewAppServerExec("", nil, nil, types.ClientInfo{}, "", "")
+	sub := make(chan appEvent, 16)
+	output := make(chan ExecResult, 16)
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+
+	activeGoal := &types.ThreadGoal{
+		ThreadID:  "thread-goal",
+		Objective: "delayed start",
+		Status:    types.ThreadGoalStatusActive,
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- exec.streamGoalContinuation(ctx, "thread-goal", CodexExecArgs{}, activeGoal, sub, output)
+	}()
+
+	time.Sleep(defaultGoalContinuationStartTimeout + 100*time.Millisecond)
+	select {
+	case err := <-errCh:
+		t.Fatalf("active goal stream ended before delayed turn: %v", err)
+	default:
+	}
+
+	sub <- appEvent{
+		Method: "turn/started",
+		Params: json.RawMessage(`{"threadId":"thread-goal","turn":{"id":"turn-delayed"}}`),
+	}
+	sub <- appEvent{
+		Method: "item/completed",
+		Params: json.RawMessage(`{"threadId":"thread-goal","turnId":"turn-delayed","item":{"id":"msg-delayed","type":"agentMessage","text":"real output"}}`),
+	}
+	sub <- appEvent{
+		Method: "thread/goal/updated",
+		Params: json.RawMessage(`{"threadId":"thread-goal","turnId":"turn-delayed","goal":{"threadId":"thread-goal","objective":"delayed start","status":"complete","createdAt":1,"updatedAt":2}}`),
+	}
+	sub <- appEvent{
+		Method: "turn/completed",
+		Params: json.RawMessage(`{"threadId":"thread-goal","turnId":"turn-delayed","usage":{"inputTokens":1,"cachedInputTokens":0,"outputTokens":1}}`),
+	}
+
+	if err := <-errCh; err != nil {
+		t.Fatalf("streamGoalContinuation returned error: %v", err)
+	}
+	close(output)
+
+	var joined string
+	for result := range output {
+		if result.Error != nil {
+			t.Fatalf("unexpected output error: %v", result.Error)
+		}
+		joined += result.Line + "\n"
+	}
+	if strings.Contains(joined, "msg-synth") || strings.Contains(joined, "Goal: delayed start") {
+		t.Fatalf("active goal emitted synthetic summary before real turn: %s", joined)
+	}
+	if !strings.Contains(joined, "real output") {
+		t.Fatalf("real delayed turn output missing: %s", joined)
 	}
 }
 

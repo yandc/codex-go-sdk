@@ -994,6 +994,27 @@ func (a *AppServerExec) runGoalSet(
 	return a.streamGoalContinuation(ctx, threadID, args, goal, sub, output)
 }
 
+func threadSettingsCollaborationModeLineMatches(
+	raw json.RawMessage,
+	threadID string,
+	mode types.CollaborationModeKind,
+) bool {
+	var payload struct {
+		ThreadID       string `json:"threadId"`
+		ThreadSettings struct {
+			CollaborationMode *types.CollaborationMode `json:"collaborationMode"`
+		} `json:"threadSettings"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return false
+	}
+	if threadID != "" && payload.ThreadID != "" && payload.ThreadID != threadID {
+		return false
+	}
+	return payload.ThreadSettings.CollaborationMode != nil &&
+		payload.ThreadSettings.CollaborationMode.Mode == mode
+}
+
 func (a *AppServerExec) streamGoalContinuation(
 	ctx context.Context,
 	threadID string,
@@ -1007,6 +1028,7 @@ func (a *AppServerExec) streamGoalContinuation(
 	}
 	startTimer := time.NewTimer(defaultGoalContinuationStartTimeout)
 	defer startTimer.Stop()
+	startDeadline := startTimer.C
 
 	sawTurn := false
 	interruptCh := ctx.Done()
@@ -1018,8 +1040,12 @@ func (a *AppServerExec) streamGoalContinuation(
 
 	for {
 		select {
-		case <-startTimer.C:
+		case <-startDeadline:
 			if !sawTurn {
+				if goalStatus == types.ThreadGoalStatusActive {
+					startDeadline = nil
+					continue
+				}
 				return emitSyntheticGoalMessage(output, goal)
 			}
 		case <-interruptCh:
@@ -1041,6 +1067,7 @@ func (a *AppServerExec) streamGoalContinuation(
 				activeGoalTurn = true
 				sawTurn = true
 				stopTimer(startTimer)
+				startDeadline = nil
 			}
 			if status, ok := goalStatusFromEvent(event, threadID); ok {
 				goalStatus = status
@@ -1545,6 +1572,13 @@ func appendThreadContextParams(params map[string]interface{}, args CodexExecArgs
 	}
 	if args.SandboxMode != "" {
 		params["sandbox"] = args.SandboxMode
+	}
+	if args.CollaborationMode != nil {
+		params["collaborationMode"] = buildCollaborationMode(
+			args.CollaborationMode,
+			args.Model,
+			args.ModelReasoningEffort,
+		)
 	}
 }
 
