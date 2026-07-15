@@ -19,6 +19,7 @@ import (
 
 const (
 	envInternalOriginatorOverrideKey = "CODEX_INTERNAL_ORIGINATOR_OVERRIDE"
+	defaultOriginator                = "codex_cli_rs"
 	envBaseURLKey                    = "OPENAI_BASE_URL"
 	envCodexAPIEnvVar                = "CODEX_API_KEY"
 )
@@ -395,7 +396,7 @@ func buildExecEnv(envOverride map[string]string, args CodexExecArgs) []string {
 	}
 
 	if !hasOriginatorOverride(env) {
-		env = append(env, envInternalOriginatorOverrideKey+"=codex_sdk_go")
+		env = append(env, envInternalOriginatorOverrideKey+"="+defaultOriginator)
 	}
 
 	if args.BaseUrl != "" {

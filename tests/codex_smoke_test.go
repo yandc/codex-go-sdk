@@ -273,7 +273,7 @@ func TestEnvPassedToExec(t *testing.T) {
 		t.Errorf("Base URL not in env: %v", envs[0])
 	}
 
-	if envs[0]["CODEX_INTERNAL_ORIGINATOR_OVERRIDE"] != "codex_sdk_go" {
+	if envs[0]["CODEX_INTERNAL_ORIGINATOR_OVERRIDE"] != "codex_cli_rs" {
 		t.Error("Originator not set correctly")
 	}
 }

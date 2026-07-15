@@ -150,7 +150,7 @@ func buildCommandArgs(args codex.CodexExecArgs) []string {
 // buildEnvMap builds the environment map
 func buildEnvMap(args codex.CodexExecArgs) map[string]string {
 	env := make(map[string]string)
-	env["CODEX_INTERNAL_ORIGINATOR_OVERRIDE"] = "codex_sdk_go"
+	env["CODEX_INTERNAL_ORIGINATOR_OVERRIDE"] = "codex_cli_rs"
 	if args.BaseUrl != "" {
 		env["OPENAI_BASE_URL"] = args.BaseUrl
 	}

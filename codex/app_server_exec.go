@@ -157,7 +157,7 @@ func (a *AppServerExec) start() error {
 		}
 	}
 	if !foundOriginator {
-		env = append(env, envInternalOriginatorOverrideKey+"=codex_sdk_go")
+		env = append(env, envInternalOriginatorOverrideKey+"="+defaultOriginator)
 	}
 	if a.baseURL != "" {
 		env = append(env, fmt.Sprintf("%s=%s", envBaseURLKey, a.baseURL))
