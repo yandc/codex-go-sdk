@@ -140,6 +140,7 @@ func (a *AppServerExec) ensureStarted() error {
 func (a *AppServerExec) start() error {
 	// #nosec G204 -- Executable path and args are user-provided by design in SDK integrations.
 	cmd := exec.CommandContext(context.Background(), a.executablePath, a.args...)
+	configurePlatformCommand(cmd)
 
 	// Set up environment
 	env := os.Environ()

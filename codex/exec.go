@@ -204,6 +204,7 @@ func (c *CodexExec) Run(args CodexExecArgs) <-chan ExecResult {
 		// Create command.
 		// #nosec G204 -- Executable path and args are user-provided by design in SDK integrations.
 		cmd := exec.CommandContext(ctx, c.executablePath, commandArgs...)
+		configurePlatformCommand(cmd)
 		cmd.Env = env
 
 		// Set up stdin
