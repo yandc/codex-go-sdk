@@ -138,6 +138,10 @@ threadID := *thread.ID()
 // Later, resume the thread
 resumedThread := client.ResumeThread(threadID, codex.ThreadOptions{})
 result, _ = resumedThread.Run("Continuing the conversation", codex.TurnOptions{})
+
+// Release the live app-server subscription without deleting the persisted
+// conversation. A later Run on this thread will resume it automatically.
+_ = resumedThread.Close(context.Background())
 ```
 
 ## Configuration Options

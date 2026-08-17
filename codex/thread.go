@@ -33,6 +33,10 @@ type threadEventsExec interface {
 	SubscribeThreadEvents(args CodexExecArgs) <-chan ExecResult
 }
 
+type threadUnsubscribeExec interface {
+	UnsubscribeThread(ctx context.Context, threadID string) (*types.ThreadUnsubscribeResponse, error)
+}
+
 var syntheticTurnCounter uint64
 
 // Thread represents a conversation thread with the agent.
@@ -46,6 +50,33 @@ type Thread struct {
 // ID returns the thread ID. Populated after the first turn starts.
 func (t *Thread) ID() *string {
 	return t.id
+}
+
+// Unsubscribe removes this SDK connection's subscription to the thread. The
+// app server unloads a thread after its own no-subscriber inactivity period.
+// A later turn transparently resumes the persisted thread.
+func (t *Thread) Unsubscribe(ctx context.Context) (*types.ThreadUnsubscribeResponse, error) {
+	if t == nil || t.id == nil || strings.TrimSpace(*t.id) == "" {
+		return &types.ThreadUnsubscribeResponse{Status: types.ThreadUnsubscribeStatusNotLoaded}, nil
+	}
+	threadID := strings.TrimSpace(*t.id)
+	if exec, ok := t.exec.(threadUnsubscribeExec); ok {
+		return exec.UnsubscribeThread(ctx, threadID)
+	}
+	var response types.ThreadUnsubscribeResponse
+	if err := t.appServerRPCTyped(ctx, "thread/unsubscribe", map[string]interface{}{
+		"threadId": threadID,
+	}, &response); err != nil {
+		return nil, err
+	}
+	return &response, nil
+}
+
+// Close releases the live app-server resources associated with the thread
+// without deleting or archiving its persisted conversation.
+func (t *Thread) Close(ctx context.Context) error {
+	_, err := t.Unsubscribe(ctx)
+	return err
 }
 
 // SetCollaborationMode updates the app-server thread collaboration mode for subsequent turns.

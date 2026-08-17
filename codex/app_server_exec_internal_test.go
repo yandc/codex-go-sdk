@@ -232,6 +232,45 @@ func TestHandleLineDispatchesServerRequestWithID(t *testing.T) {
 	}
 }
 
+func TestHandleLineThreadClosedEvictsKnownThread(t *testing.T) {
+	exec := NewAppServerExec("", nil, nil, types.ClientInfo{}, "", "")
+	exec.knownThreads["thread-1"] = struct{}{}
+
+	exec.handleLine(`{"method":"thread/closed","params":{"threadId":"thread-1"}}`)
+
+	exec.knownThreadsMu.Lock()
+	_, known := exec.knownThreads["thread-1"]
+	exec.knownThreadsMu.Unlock()
+	if known {
+		t.Fatal("thread/closed did not evict the known thread")
+	}
+}
+
+func TestForgetKnownThreadIgnoresEmptyID(t *testing.T) {
+	exec := NewAppServerExec("", nil, nil, types.ClientInfo{}, "", "")
+	exec.knownThreads["thread-1"] = struct{}{}
+	exec.forgetKnownThread("")
+	if _, known := exec.knownThreads["thread-1"]; !known {
+		t.Fatal("empty thread id changed the known thread cache")
+	}
+}
+
+func TestApplyThreadUnsubscribeResultEvictsKnownThread(t *testing.T) {
+	exec := NewAppServerExec("", nil, nil, types.ClientInfo{}, "", "")
+	exec.knownThreads["thread-1"] = struct{}{}
+
+	response, err := exec.applyThreadUnsubscribeResult("thread-1", json.RawMessage(`{"status":"unsubscribed"}`))
+	if err != nil {
+		t.Fatalf("applyThreadUnsubscribeResult: %v", err)
+	}
+	if response.Status != types.ThreadUnsubscribeStatusUnsubscribed {
+		t.Fatalf("status = %q", response.Status)
+	}
+	if _, known := exec.knownThreads["thread-1"]; known {
+		t.Fatal("successful thread/unsubscribe did not evict the known thread")
+	}
+}
+
 func TestSubmitApprovalRespondsToCommandExecutionRequest(t *testing.T) {
 	stdin := &captureWriteCloser{}
 	exec := &AppServerExec{stdin: stdin}

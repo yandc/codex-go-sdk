@@ -246,6 +246,9 @@ func (a *AppServerExec) handleLine(line string) {
 		return
 	}
 	if envelope.Method != "" {
+		if envelope.Method == "thread/closed" {
+			a.forgetKnownThread(threadIDFromRawParams(envelope.Params))
+		}
 		a.dispatchEvent(appEvent{ID: envelope.ID, Method: envelope.Method, Params: envelope.Params})
 		return
 	}
@@ -258,6 +261,26 @@ func (a *AppServerExec) handleLine(line string) {
 		}
 		return
 	}
+}
+
+func threadIDFromRawParams(params json.RawMessage) string {
+	var value struct {
+		ThreadID string `json:"threadId"`
+	}
+	if err := json.Unmarshal(params, &value); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(value.ThreadID)
+}
+
+func (a *AppServerExec) forgetKnownThread(threadID string) {
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" {
+		return
+	}
+	a.knownThreadsMu.Lock()
+	delete(a.knownThreads, threadID)
+	a.knownThreadsMu.Unlock()
 }
 
 func (a *AppServerExec) dispatchEvent(event appEvent) {
@@ -331,6 +354,35 @@ func (a *AppServerExec) RPCCall(ctx context.Context, method string, params inter
 		ctx = context.Background()
 	}
 	return a.call(ctx, method, params)
+}
+
+// UnsubscribeThread removes this connection's subscription and evicts the
+// local loaded-thread cache so a later turn performs thread/resume.
+func (a *AppServerExec) UnsubscribeThread(ctx context.Context, threadID string) (*types.ThreadUnsubscribeResponse, error) {
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" {
+		return &types.ThreadUnsubscribeResponse{Status: types.ThreadUnsubscribeStatusNotLoaded}, nil
+	}
+	if err := a.ensureStarted(); err != nil {
+		return nil, err
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	result, err := a.call(ctx, "thread/unsubscribe", map[string]interface{}{"threadId": threadID})
+	if err != nil {
+		return nil, err
+	}
+	return a.applyThreadUnsubscribeResult(threadID, result)
+}
+
+func (a *AppServerExec) applyThreadUnsubscribeResult(threadID string, result json.RawMessage) (*types.ThreadUnsubscribeResponse, error) {
+	var response types.ThreadUnsubscribeResponse
+	if err := json.Unmarshal(result, &response); err != nil {
+		return nil, err
+	}
+	a.forgetKnownThread(threadID)
+	return &response, nil
 }
 
 // LoginChatGPTDeviceCode starts account/login/start with type chatgptDeviceCode and streams login progress.

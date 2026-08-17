@@ -34,8 +34,30 @@ func (m *mockRPCExec) RPCCall(_ context.Context, method string, params interface
 		return json.RawMessage(`{"goal":{"threadId":"thread-goal-1","objective":"Ship goal support","status":"active","tokenBudget":null,"tokensUsed":0,"timeUsedSeconds":0,"createdAt":1,"updatedAt":2}}`), nil
 	case "thread/goal/clear":
 		return json.RawMessage(`{"cleared":true}`), nil
+	case "thread/unsubscribe":
+		return json.RawMessage(`{"status":"unsubscribed"}`), nil
 	default:
 		return json.RawMessage(`{}`), nil
+	}
+}
+
+func TestThreadCloseUnsubscribesWithoutDeletingHistory(t *testing.T) {
+	exec := &mockRPCExec{}
+	client := codex.NewCodexWithExec(exec, types.CodexOptions{Transport: types.TransportAppServer})
+	thread := client.ResumeThread("thread-close-1", types.ThreadOptions{})
+
+	if err := thread.Close(context.Background()); err != nil {
+		t.Fatalf("Close returned error: %v", err)
+	}
+	if len(exec.calls) != 1 {
+		t.Fatalf("RPC calls = %d, want 1", len(exec.calls))
+	}
+	if exec.calls[0].method != "thread/unsubscribe" {
+		t.Fatalf("method = %q, want thread/unsubscribe", exec.calls[0].method)
+	}
+	params, ok := exec.calls[0].params.(map[string]interface{})
+	if !ok || params["threadId"] != "thread-close-1" {
+		t.Fatalf("params = %#v", exec.calls[0].params)
 	}
 }
 
