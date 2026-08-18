@@ -150,7 +150,7 @@ _ = resumedThread.Close(context.Background())
 
 - `Transport`: Select backend transport (`app-server`, `cli`); default is `app-server`.
 - `AppServerPathOverride`: Override executable path used for app-server transport.
-- `AppServerArgs`: Extra process args for app-server transport (default runs `codex app-server`).
+- `AppServerArgs`: Extra process args appended after the `app-server` subcommand (default runs `codex app-server`).
 - `ClientInfo`: Client identity sent during app-server `initialize`.
 - `CodexPathOverride`: Override executable path used for CLI transport.
 - `BaseUrl`: API base URL passed to backend process via environment.
@@ -183,6 +183,7 @@ Notes:
 - `Model`: Model name for the thread.
 - `SandboxMode`: Sandbox mode (`read-only`, `workspace-write`, `danger-full-access`).
 - `WorkingDirectory`: Working directory (`cwd`) used by the agent.
+- `DeveloperInstructions`: Developer instructions override sent to app-server for thread start, resume, and fork.
 - `SkipGitRepoCheck`: Skip git repository check (CLI transport only).
 - `DisableSkills`: Disable skills feature (CLI transport only).
 - `FastService`: Fast service mode string. Use `on` to force fast service, `off` to explicitly clear it, or leave empty to omit `service_tier`.
@@ -201,6 +202,7 @@ Notes:
 - `ApprovalHandler` only applies to app-server transport. CLI transport does not surface approval requests.
 - `NetworkAccessEnabled` is enforced via sandbox policy in app-server transport; in CLI transport it maps to CLI config where supported.
 - `CollaborationMode` only applies to app-server `turn/start`. CLI transport ignores it.
+- `DeveloperInstructions` only applies to app-server transport. CLI transport ignores it.
 
 Plan mode example:
 

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -23,12 +24,13 @@ func (c *captureWriteCloser) Close() error {
 
 func TestBuildThreadStartParamsIncludesPermissions(t *testing.T) {
 	params := buildThreadStartParams(CodexExecArgs{
-		Model:            "test-model",
-		ModelProvider:    "openai",
-		SandboxMode:      string(types.SandboxModeFullAccess),
-		ApprovalPolicy:   string(types.ApprovalModeNever),
-		WorkingDirectory: "/tmp/project",
-		FastService:      "on",
+		Model:                 "test-model",
+		ModelProvider:         "openai",
+		SandboxMode:           string(types.SandboxModeFullAccess),
+		ApprovalPolicy:        string(types.ApprovalModeNever),
+		WorkingDirectory:      "/tmp/project",
+		DeveloperInstructions: "MindFS instructions",
+		FastService:           "on",
 	})
 
 	assertParam(t, params, "model", "test-model")
@@ -36,15 +38,17 @@ func TestBuildThreadStartParamsIncludesPermissions(t *testing.T) {
 	assertParam(t, params, "sandbox", "danger-full-access")
 	assertParam(t, params, "approvalPolicy", "never")
 	assertParam(t, params, "cwd", "/tmp/project")
+	assertParam(t, params, "developerInstructions", "MindFS instructions")
 	assertParam(t, params, "serviceTier", "fast")
 }
 
 func TestBuildThreadResumeParamsIncludesPermissions(t *testing.T) {
 	params := buildThreadResumeParams("thread-1", CodexExecArgs{
-		Model:            "test-model",
-		SandboxMode:      string(types.SandboxModeWorkspaceWrite),
-		ApprovalPolicy:   string(types.ApprovalModeOnRequest),
-		WorkingDirectory: "/tmp/project",
+		Model:                 "test-model",
+		SandboxMode:           string(types.SandboxModeWorkspaceWrite),
+		ApprovalPolicy:        string(types.ApprovalModeOnRequest),
+		WorkingDirectory:      "/tmp/project",
+		DeveloperInstructions: "MindFS instructions",
 	}, "openai")
 
 	assertParam(t, params, "threadId", "thread-1")
@@ -53,6 +57,26 @@ func TestBuildThreadResumeParamsIncludesPermissions(t *testing.T) {
 	assertParam(t, params, "sandbox", "workspace-write")
 	assertParam(t, params, "approvalPolicy", "on-request")
 	assertParam(t, params, "cwd", "/tmp/project")
+	assertParam(t, params, "developerInstructions", "MindFS instructions")
+}
+
+func TestBuildThreadForkParamsIncludesDeveloperInstructions(t *testing.T) {
+	params := buildThreadForkParams("thread-1", types.ThreadForkOptions{
+		ThreadOptions: types.ThreadOptions{
+			DeveloperInstructions: "MindFS instructions",
+		},
+	})
+
+	assertParam(t, params, "threadId", "thread-1")
+	assertParam(t, params, "developerInstructions", "MindFS instructions")
+}
+
+func TestNewAppServerExecPrependsSubcommandToExtraArgs(t *testing.T) {
+	exec := NewAppServerExec("codex", []string{"--strict-config"}, nil, types.ClientInfo{}, "", "")
+	want := []string{"app-server", "--strict-config"}
+	if !reflect.DeepEqual(exec.args, want) {
+		t.Fatalf("args = %#v, want %#v", exec.args, want)
+	}
 }
 
 func TestBuildThreadResumeParamsIncludesCollaborationMode(t *testing.T) {

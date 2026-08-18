@@ -208,13 +208,14 @@ func (c *Codex) Close() error {
 
 func buildThreadForkParams(sourceThreadID string, options types.ThreadForkOptions) map[string]interface{} {
 	args := normalizeReasoningEffortForModel(CodexExecArgs{
-		Model:                strings.TrimSpace(options.Model),
-		ModelProvider:        strings.TrimSpace(options.ModelProvider),
-		FastService:          options.FastService,
-		WorkingDirectory:     strings.TrimSpace(options.WorkingDirectory),
-		SandboxMode:          string(options.SandboxMode),
-		ApprovalPolicy:       string(options.ApprovalPolicy),
-		ModelReasoningEffort: string(options.ModelReasoningEffort),
+		Model:                 strings.TrimSpace(options.Model),
+		ModelProvider:         strings.TrimSpace(options.ModelProvider),
+		FastService:           options.FastService,
+		WorkingDirectory:      strings.TrimSpace(options.WorkingDirectory),
+		DeveloperInstructions: strings.TrimSpace(options.DeveloperInstructions),
+		SandboxMode:           string(options.SandboxMode),
+		ApprovalPolicy:        string(options.ApprovalPolicy),
+		ModelReasoningEffort:  string(options.ModelReasoningEffort),
 	})
 	params := map[string]interface{}{
 		"threadId": strings.TrimSpace(sourceThreadID),

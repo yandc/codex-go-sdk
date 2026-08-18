@@ -38,6 +38,7 @@ type CodexExecArgs struct {
 	ModelProvider         string
 	SandboxMode           string
 	WorkingDirectory      string
+	DeveloperInstructions string
 	AdditionalDirectories []string
 	SkipGitRepoCheck      bool
 	DisableSkills         bool

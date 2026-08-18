@@ -159,7 +159,7 @@ type CodexOptions struct {
 	// AppServerPathOverride is an optional path to the app server executable.
 	// When unset, the SDK will try to locate the codex binary and run it with "app-server".
 	AppServerPathOverride string
-	// AppServerArgs are optional arguments passed to the app server executable.
+	// AppServerArgs are optional arguments passed after the "app-server" subcommand.
 	AppServerArgs []string
 	// ClientInfo identifies the SDK client to the app server (initialize).
 	ClientInfo ClientInfo
@@ -191,6 +191,9 @@ type ThreadOptions struct {
 	SandboxMode SandboxMode
 	// WorkingDirectory is the working directory for the thread
 	WorkingDirectory string
+	// DeveloperInstructions overrides the effective developer instructions for the thread.
+	// This is app-server-only. CLI transport ignores it.
+	DeveloperInstructions string
 	// SkipGitRepoCheck skips the git repository check
 	SkipGitRepoCheck bool
 	// DisableSkills disables the Codex CLI skills feature.

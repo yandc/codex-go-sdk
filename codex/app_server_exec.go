@@ -86,9 +86,7 @@ func NewAppServerExec(
 	if executablePath == "" {
 		executablePath = findCodexPath()
 	}
-	if len(args) == 0 {
-		args = []string{"app-server"}
-	}
+	args = append([]string{"app-server"}, args...)
 	if clientInfo.Name == "" {
 		clientInfo.Name = "codex-go-sdk"
 		clientInfo.Version = codexSDKVersion
@@ -1619,6 +1617,9 @@ func appendThreadContextParams(params map[string]interface{}, args CodexExecArgs
 	}
 	if args.WorkingDirectory != "" {
 		params["cwd"] = args.WorkingDirectory
+	}
+	if args.DeveloperInstructions != "" {
+		params["developerInstructions"] = args.DeveloperInstructions
 	}
 	if args.ApprovalPolicy != "" {
 		params["approvalPolicy"] = args.ApprovalPolicy

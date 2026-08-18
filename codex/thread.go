@@ -300,6 +300,7 @@ func (t *Thread) buildExecArgs(
 		ModelProvider:         options.ModelProvider,
 		SandboxMode:           string(options.SandboxMode),
 		WorkingDirectory:      options.WorkingDirectory,
+		DeveloperInstructions: options.DeveloperInstructions,
 		SkipGitRepoCheck:      options.SkipGitRepoCheck,
 		DisableSkills:         options.DisableSkills,
 		OutputSchemaFile:      schemaPath,
@@ -811,12 +812,13 @@ func (t *Thread) ensureAppServerThread(ctx context.Context) (string, error) {
 	}
 
 	params := buildThreadStartParams(CodexExecArgs{
-		Model:            strings.TrimSpace(t.threadOptions.Model),
-		ModelProvider:    strings.TrimSpace(t.threadOptions.ModelProvider),
-		FastService:      t.threadOptions.FastService,
-		WorkingDirectory: strings.TrimSpace(t.threadOptions.WorkingDirectory),
-		SandboxMode:      string(t.threadOptions.SandboxMode),
-		ApprovalPolicy:   string(t.threadOptions.ApprovalPolicy),
+		Model:                 strings.TrimSpace(t.threadOptions.Model),
+		ModelProvider:         strings.TrimSpace(t.threadOptions.ModelProvider),
+		FastService:           t.threadOptions.FastService,
+		WorkingDirectory:      strings.TrimSpace(t.threadOptions.WorkingDirectory),
+		DeveloperInstructions: strings.TrimSpace(t.threadOptions.DeveloperInstructions),
+		SandboxMode:           string(t.threadOptions.SandboxMode),
+		ApprovalPolicy:        string(t.threadOptions.ApprovalPolicy),
 	})
 
 	var response struct {
