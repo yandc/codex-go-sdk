@@ -12,12 +12,35 @@ const (
 	CommandExecutionStatusDeclined   CommandExecutionStatus = "declined"
 )
 
+// CommandActionType identifies the best-effort semantic action represented by
+// a shell command.
+type CommandActionType string
+
+const (
+	CommandActionTypeRead      CommandActionType = "read"
+	CommandActionTypeListFiles CommandActionType = "listFiles"
+	CommandActionTypeSearch    CommandActionType = "search"
+	CommandActionTypeUnknown   CommandActionType = "unknown"
+)
+
+// CommandAction is Codex's best-effort parsing of one action in a command.
+// Fields that do not apply to the action type are omitted.
+type CommandAction struct {
+	Type    CommandActionType `json:"type"`
+	Command string            `json:"command"`
+	Name    string            `json:"name,omitempty"`
+	Path    *string           `json:"path,omitempty"`
+	Query   *string           `json:"query,omitempty"`
+}
+
 // CommandExecutionItem represents a command executed by the agent.
 type CommandExecutionItem struct {
 	ID   string `json:"id"`
 	Type string `json:"type"`
 	// Command is the command line executed by the agent
 	Command string `json:"command"`
+	// CommandActions is a best-effort semantic parsing of the command.
+	CommandActions []CommandAction `json:"commandActions,omitempty"`
 	// AggregatedOutput is stdout and stderr captured while the command was running
 	AggregatedOutput *string `json:"aggregatedOutput,omitempty"`
 	// ExitCode is set when the command exits; omitted while still running
@@ -34,6 +57,8 @@ func (i *CommandExecutionItem) UnmarshalJSON(data []byte) error {
 		ID                  string                 `json:"id"`
 		Type                string                 `json:"type"`
 		Command             string                 `json:"command"`
+		CommandActions      []CommandAction        `json:"commandActions"`
+		CommandActionsAlt   []CommandAction        `json:"command_actions"`
 		AggregatedOutput    *string                `json:"aggregatedOutput"`
 		AggregatedOutputAlt *string                `json:"aggregated_output"`
 		ExitCode            *int                   `json:"exitCode"`
@@ -47,6 +72,11 @@ func (i *CommandExecutionItem) UnmarshalJSON(data []byte) error {
 	i.ID = payload.ID
 	i.Type = payload.Type
 	i.Command = payload.Command
+	if payload.CommandActions != nil {
+		i.CommandActions = payload.CommandActions
+	} else {
+		i.CommandActions = payload.CommandActionsAlt
+	}
 	if payload.AggregatedOutput != nil {
 		i.AggregatedOutput = payload.AggregatedOutput
 	} else {

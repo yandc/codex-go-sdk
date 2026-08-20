@@ -27,6 +27,8 @@ type (
 	CollaborationMode = types.CollaborationMode
 	// CommandExecutionStatus represents the status of a command execution.
 	CommandExecutionStatus = types.CommandExecutionStatus
+	// CommandActionType identifies a parsed command action.
+	CommandActionType = types.CommandActionType
 	// PatchChangeKind indicates the type of file change.
 	PatchChangeKind = types.PatchChangeKind
 	// PatchApplyStatus represents the status of a file change.
@@ -47,6 +49,14 @@ type (
 const (
 	TransportAppServer = types.TransportAppServer
 	TransportCLI       = types.TransportCLI
+)
+
+// Constant values for CommandActionType.
+const (
+	CommandActionTypeRead      = types.CommandActionTypeRead
+	CommandActionTypeListFiles = types.CommandActionTypeListFiles
+	CommandActionTypeSearch    = types.CommandActionTypeSearch
+	CommandActionTypeUnknown   = types.CommandActionTypeUnknown
 )
 
 // Constant values for ApprovalMode.
@@ -164,6 +174,7 @@ type (
 // Re-export item types.
 type (
 	ThreadItem            = types.ThreadItem
+	CommandAction         = types.CommandAction
 	CommandExecutionItem  = types.CommandExecutionItem
 	FileUpdateChange      = types.FileUpdateChange
 	FileChangeItem        = types.FileChangeItem

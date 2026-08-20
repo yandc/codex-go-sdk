@@ -759,6 +759,9 @@ func TestItemStartedEvent_CommandExecutionSchema(t *testing.T) {
 			"type": "commandExecution",
 			"id": "cmd-1",
 			"command": "ls",
+			"commandActions": [
+				{"type":"listFiles","command":"ls","path":"src"}
+			],
 			"aggregatedOutput": "ok",
 			"source": "userShell",
 			"status": "inProgress"
@@ -781,6 +784,32 @@ func TestItemStartedEvent_CommandExecutionSchema(t *testing.T) {
 	}
 	if item.Source != "userShell" {
 		t.Fatalf("expected source %q, got %q", "userShell", item.Source)
+	}
+	if len(item.CommandActions) != 1 || item.CommandActions[0].Type != types.CommandActionTypeListFiles {
+		t.Fatalf("expected listFiles command action, got %#v", item.CommandActions)
+	}
+	if item.CommandActions[0].Path == nil || *item.CommandActions[0].Path != "src" {
+		t.Fatalf("expected command action path %q, got %#v", "src", item.CommandActions[0].Path)
+	}
+}
+
+func TestCommandExecutionItemSupportsSnakeCaseCommandActions(t *testing.T) {
+	payload := []byte(`{
+		"type":"command_execution",
+		"id":"cmd-2",
+		"command":"rg TODO server",
+		"command_actions":[{"type":"search","command":"rg TODO server","query":"TODO","path":"server"}],
+		"status":"completed"
+	}`)
+	var item types.CommandExecutionItem
+	if err := json.Unmarshal(payload, &item); err != nil {
+		t.Fatalf("unmarshal command execution: %v", err)
+	}
+	if len(item.CommandActions) != 1 || item.CommandActions[0].Type != types.CommandActionTypeSearch {
+		t.Fatalf("expected search command action, got %#v", item.CommandActions)
+	}
+	if item.CommandActions[0].Query == nil || *item.CommandActions[0].Query != "TODO" {
+		t.Fatalf("expected query %q, got %#v", "TODO", item.CommandActions[0].Query)
 	}
 }
 
