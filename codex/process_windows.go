@@ -26,3 +26,10 @@ func configurePlatformCommand(cmd *exec.Cmd) {
 		CreationFlags: windowsProcessCreationFlags(),
 	}
 }
+
+func killPlatformCommand(cmd *exec.Cmd) error {
+	if cmd == nil || cmd.Process == nil {
+		return nil
+	}
+	return cmd.Process.Kill()
+}

@@ -57,6 +57,7 @@ type AppServerExec struct {
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
 	stdout io.ReadCloser
+	cmdMu  sync.RWMutex
 
 	writeMu sync.Mutex
 
@@ -184,7 +185,9 @@ func (a *AppServerExec) start() error {
 		return fmt.Errorf("failed to start app server: %w", startErr)
 	}
 
+	a.cmdMu.Lock()
 	a.cmd = cmd
+	a.cmdMu.Unlock()
 	a.stdin = stdin
 	a.stdout = stdout
 
@@ -201,6 +204,19 @@ func (a *AppServerExec) start() error {
 	return nil
 }
 
+// ProcessID returns the app-server PID, or 0 before the process starts.
+func (a *AppServerExec) ProcessID() int {
+	if a == nil {
+		return 0
+	}
+	a.cmdMu.RLock()
+	defer a.cmdMu.RUnlock()
+	if a.cmd == nil || a.cmd.Process == nil {
+		return 0
+	}
+	return a.cmd.Process.Pid
+}
+
 func (a *AppServerExec) readStdout() {
 	reader := bufio.NewReader(a.stdout)
 	for {
@@ -212,12 +228,16 @@ func (a *AppServerExec) readStdout() {
 			}
 		}
 		if err != nil {
-			if err != io.EOF {
+			if err != io.EOF && !isExpectedReadCloseError(err) {
 				a.logf("app server stdout error: %v", err)
 			}
 			return
 		}
 	}
+}
+
+func isExpectedReadCloseError(err error) bool {
+	return err == nil || errors.Is(err, os.ErrClosed) || errors.Is(err, io.ErrClosedPipe)
 }
 
 func (a *AppServerExec) readStderr(stderr io.Reader) {
@@ -462,13 +482,16 @@ func (a *AppServerExec) Close() error {
 				closeErr = err
 			}
 		}
-		if a.cmd != nil {
-			if a.cmd.Process != nil {
-				if err := a.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) && closeErr == nil {
+		a.cmdMu.RLock()
+		cmd := a.cmd
+		a.cmdMu.RUnlock()
+		if cmd != nil {
+			if cmd.Process != nil {
+				if err := killPlatformCommand(cmd); err != nil && !errors.Is(err, os.ErrProcessDone) && closeErr == nil {
 					closeErr = err
 				}
 			}
-			if err := a.cmd.Wait(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+			if err := cmd.Wait(); err != nil && !errors.Is(err, os.ErrProcessDone) {
 				var exitErr *exec.ExitError
 				if !errors.As(err, &exitErr) && closeErr == nil {
 					closeErr = err

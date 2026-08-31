@@ -26,6 +26,10 @@ type closeableExec interface {
 	Close() error
 }
 
+type processIDExec interface {
+	ProcessID() int
+}
+
 // Codex is the main class for interacting with the Codex agent.
 // Use the StartThread() method to start a new thread or ResumeThread() to resume a previously started thread.
 type Codex struct {
@@ -204,6 +208,18 @@ func (c *Codex) Close() error {
 		return exec.Close()
 	}
 	return nil
+}
+
+// ProcessID returns the PID of the long-lived transport process, or 0 when
+// the transport has not started or does not expose a process.
+func (c *Codex) ProcessID() int {
+	if c == nil {
+		return 0
+	}
+	if exec, ok := c.exec.(processIDExec); ok {
+		return exec.ProcessID()
+	}
+	return 0
 }
 
 func buildThreadForkParams(sourceThreadID string, options types.ThreadForkOptions) map[string]interface{} {

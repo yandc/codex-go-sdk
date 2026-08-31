@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -13,6 +14,17 @@ import (
 
 	"github.com/fanwenlin/codex-go-sdk/types"
 )
+
+func TestIsExpectedReadCloseError(t *testing.T) {
+	for _, err := range []error{nil, os.ErrClosed, io.ErrClosedPipe, &os.PathError{Op: "read", Path: "|0", Err: os.ErrClosed}} {
+		if !isExpectedReadCloseError(err) {
+			t.Fatalf("error %v should be treated as an expected stream close", err)
+		}
+	}
+	if isExpectedReadCloseError(errors.New("unexpected read failure")) {
+		t.Fatal("unexpected read failure was suppressed")
+	}
+}
 
 type captureWriteCloser struct {
 	bytes.Buffer
