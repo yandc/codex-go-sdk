@@ -726,6 +726,99 @@ func TestAppEventToLegacyLineContextCompactionStatus(t *testing.T) {
 	assertContextCompactionStatus(t, completedLine, "complete")
 }
 
+func TestAppEventToLegacyLineAccumulatesTokenUsageIntoTurnCompleted(t *testing.T) {
+	state := &turnState{items: make(map[string]map[string]interface{})}
+	_, done, err := appEventToLegacyLine(appEvent{
+		Method: "thread/tokenUsage/updated",
+		Params: json.RawMessage(`{
+			"threadId":"thread-1",
+			"turnId":"turn-1",
+			"tokenUsage":{
+				"total":{"totalTokens":200,"inputTokens":150,"cachedInputTokens":100,"outputTokens":50},
+				"last":{"totalTokens":130,"inputTokens":100,"cachedInputTokens":80,"outputTokens":30},
+				"modelContextWindow":200000
+			}
+		}`),
+	}, state)
+	if err != nil || done {
+		t.Fatalf("token usage conversion: done=%v err=%v", done, err)
+	}
+	_, done, err = appEventToLegacyLine(appEvent{
+		Method: "thread/tokenUsage/updated",
+		Params: json.RawMessage(`{
+			"threadId":"thread-1",
+			"turnId":"turn-1",
+			"tokenUsage":{
+				"total":{"totalTokens":260,"inputTokens":190,"cachedInputTokens":120,"outputTokens":70},
+				"last":{"totalTokens":60,"inputTokens":40,"cachedInputTokens":20,"outputTokens":20},
+				"modelContextWindow":200000
+			}
+		}`),
+	}, state)
+	if err != nil || done {
+		t.Fatalf("second token usage conversion: done=%v err=%v", done, err)
+	}
+	_, done, err = appEventToLegacyLine(appEvent{
+		Method: "thread/tokenUsage/updated",
+		Params: json.RawMessage(`{
+			"threadId":"thread-1",
+			"turnId":"turn-1",
+			"tokenUsage":{
+				"total":{"totalTokens":260,"inputTokens":190,"cachedInputTokens":120,"outputTokens":70},
+				"last":{"totalTokens":60,"inputTokens":40,"cachedInputTokens":20,"outputTokens":20},
+				"modelContextWindow":200000
+			}
+		}`),
+	}, state)
+	if err != nil || done {
+		t.Fatalf("duplicate token usage conversion: done=%v err=%v", done, err)
+	}
+
+	completedLine, done, err := appEventToLegacyLine(appEvent{
+		Method: "turn/completed",
+		Params: json.RawMessage(`{"threadId":"thread-1","turn":{"id":"turn-1","status":"completed","items":[]}}`),
+	}, state)
+	if err != nil || !done {
+		t.Fatalf("turn completion conversion: done=%v err=%v", done, err)
+	}
+	var completed struct {
+		Usage types.Usage `json:"usage"`
+	}
+	if err := json.Unmarshal([]byte(completedLine), &completed); err != nil {
+		t.Fatalf("unmarshal completed line: %v", err)
+	}
+	if completed.Usage.InputTokens != 140 || completed.Usage.CachedInputTokens != 100 || completed.Usage.OutputTokens != 50 {
+		t.Fatalf("completed usage = %#v", completed.Usage)
+	}
+}
+
+func TestAppEventToLegacyLineResetsTokenUsageAtNextTurn(t *testing.T) {
+	state := &turnState{
+		items: make(map[string]map[string]interface{}),
+		usage: map[string]interface{}{"inputTokens": float64(100)},
+	}
+	if _, _, err := appEventToLegacyLine(appEvent{
+		Method: "turn/started",
+		Params: json.RawMessage(`{"threadId":"thread-1","turn":{"id":"turn-2"}}`),
+	}, state); err != nil {
+		t.Fatalf("turn start conversion: %v", err)
+	}
+	completedLine, _, err := appEventToLegacyLine(appEvent{
+		Method: "turn/completed",
+		Params: json.RawMessage(`{"threadId":"thread-1","turn":{"id":"turn-2","status":"completed","items":[]}}`),
+	}, state)
+	if err != nil {
+		t.Fatalf("turn completion conversion: %v", err)
+	}
+	var completed map[string]interface{}
+	if err := json.Unmarshal([]byte(completedLine), &completed); err != nil {
+		t.Fatalf("unmarshal completed line: %v", err)
+	}
+	if _, ok := completed["usage"]; ok {
+		t.Fatalf("stale usage leaked into next turn: %s", completedLine)
+	}
+}
+
 func TestParseAccountLoginEvents(t *testing.T) {
 	completed, ok, err := parseAccountLoginCompletedEvent(appEvent{
 		Method: "account/login/completed",

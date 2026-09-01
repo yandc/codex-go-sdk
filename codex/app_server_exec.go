@@ -1686,7 +1686,9 @@ func (a *AppServerExec) currentModelProvider(ctx context.Context, workingDirecto
 }
 
 type turnState struct {
-	items map[string]map[string]interface{}
+	items      map[string]map[string]interface{}
+	usage      map[string]interface{}
+	totalUsage map[string]interface{}
 }
 
 func (a *AppServerExec) handleTurnEvent(
@@ -1743,6 +1745,26 @@ func appEventToLegacyLine(event appEvent, state *turnState) (string, bool, error
 		}
 	}
 	payload["type"] = strings.ReplaceAll(method, "/", ".")
+	if method == "turn/started" {
+		state.usage = nil
+		state.totalUsage = nil
+	}
+	if method == "thread/tokenUsage/updated" {
+		if tokenUsage, ok := payload["tokenUsage"].(map[string]interface{}); ok {
+			if last, ok := tokenUsage["last"].(map[string]interface{}); ok {
+				total, hasTotal := tokenUsage["total"].(map[string]interface{})
+				if !hasTotal || !sameTokenUsage(state.totalUsage, total) {
+					state.usage = accumulateTurnUsage(state.usage, last)
+					state.totalUsage = total
+				}
+			}
+		}
+	}
+	if method == "turn/completed" {
+		if _, ok := payload["usage"]; !ok && state.usage != nil {
+			payload["usage"] = state.usage
+		}
+	}
 
 	if itemPayload, ok := payload["item"].(map[string]interface{}); ok {
 		if itemPayload["type"] == "contextCompaction" {
@@ -1764,6 +1786,33 @@ func appEventToLegacyLine(event appEvent, state *turnState) (string, bool, error
 	}
 	done := method == "turn/completed" || method == "turn/failed"
 	return string(line), done, nil
+}
+
+func accumulateTurnUsage(current, last map[string]interface{}) map[string]interface{} {
+	if current == nil {
+		current = make(map[string]interface{}, 3)
+	}
+	for _, key := range []string{"inputTokens", "cachedInputTokens", "outputTokens"} {
+		value, ok := last[key].(float64)
+		if !ok {
+			continue
+		}
+		previous, _ := current[key].(float64)
+		current[key] = previous + value
+	}
+	return current
+}
+
+func sameTokenUsage(left, right map[string]interface{}) bool {
+	if left == nil || right == nil {
+		return false
+	}
+	for _, key := range []string{"inputTokens", "cachedInputTokens", "outputTokens", "totalTokens"} {
+		if left[key] != right[key] {
+			return false
+		}
+	}
+	return true
 }
 
 func applyTextDelta(event appEvent, state *turnState, itemType string, field string) (string, bool, error) {
