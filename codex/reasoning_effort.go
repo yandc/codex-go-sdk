@@ -15,7 +15,7 @@ func normalizeReasoningEffortValueForModel(model string, effort string) string {
 	if trimmedModel == "" || !isMaxOrUltraReasoningEffort(trimmedEffort) {
 		return trimmedEffort
 	}
-	if isGPT56Model(trimmedModel) {
+	if supportsMaxOrUltraEffort(trimmedModel) {
 		return trimmedEffort
 	}
 	return "xhigh"
@@ -30,6 +30,8 @@ func isMaxOrUltraReasoningEffort(effort string) bool {
 	}
 }
 
-func isGPT56Model(model string) bool {
-	return model == "gpt-5.6" || strings.HasPrefix(model, "gpt-5.6-")
+// supportsMaxOrUltraEffort reports whether the model accepts the max and ultra
+// reasoning efforts. New models must be added explicitly.
+func supportsMaxOrUltraEffort(model string) bool {
+	return model == "gpt-5.6" || strings.HasPrefix(model, "gpt-5.6-") || model == "gpt-6-astra"
 }

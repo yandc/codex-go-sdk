@@ -165,17 +165,19 @@ func TestBuildTurnParamsIncludesDefaultCollaborationMode(t *testing.T) {
 	}
 }
 
-func TestNormalizeReasoningEffortForModelKeepsMaxUltraForGPT56(t *testing.T) {
-	for _, effort := range []types.ModelReasoningEffort{
-		types.ModelReasoningEffortMax,
-		types.ModelReasoningEffortUltra,
-	} {
-		args := normalizeReasoningEffortForModel(CodexExecArgs{
-			Model:                "gpt-5.6-sol",
-			ModelReasoningEffort: string(effort),
-		})
-		if args.ModelReasoningEffort != string(effort) {
-			t.Fatalf("ModelReasoningEffort = %q, want %q", args.ModelReasoningEffort, effort)
+func TestNormalizeReasoningEffortForModelKeepsMaxUltraForSupportedModels(t *testing.T) {
+	for _, model := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-6-astra"} {
+		for _, effort := range []types.ModelReasoningEffort{
+			types.ModelReasoningEffortMax,
+			types.ModelReasoningEffortUltra,
+		} {
+			args := normalizeReasoningEffortForModel(CodexExecArgs{
+				Model:                model,
+				ModelReasoningEffort: string(effort),
+			})
+			if args.ModelReasoningEffort != string(effort) {
+				t.Fatalf("%s ModelReasoningEffort = %q, want %q", model, args.ModelReasoningEffort, effort)
+			}
 		}
 	}
 }
